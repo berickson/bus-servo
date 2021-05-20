@@ -7,15 +7,15 @@
 
 #include "string.h"
 
-// C library headers
 #include <stdio.h>
 #include <string.h>
+#include <cmath>
 
-// Linux headers
 #include <fcntl.h> // Contains file controls like O_RDWR
 #include <errno.h> // Error integer and strerror() function
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <unistd.h> // write(), read(), close()
+
 
 using namespace std;
 
@@ -106,7 +106,7 @@ int LobotSerialServoMoveTimeWrite(int serial_port, uint8_t id, uint16_t position
 
 
 // returns true on success
-bool read_with_timeout(int serial_port, char* buf, int len, int timeout_ms = 100) {
+bool read_with_timeout(int serial_port, char* buf, int len, int timeout_ms = 500) {
   auto t1 = std::chrono::high_resolution_clock::now();
 
 
@@ -121,17 +121,30 @@ bool read_with_timeout(int serial_port, char* buf, int len, int timeout_ms = 100
     }
     auto t2 = std::chrono::high_resolution_clock::now();
     if(std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() > timeout_ms) {
+      cout << "read timed out" << endl;
       return false;
     }
     std::this_thread::sleep_for(std::chrono::microseconds(10));
   }
 }
 
+// load 0 is unpowered, 1 is powered
+void LobotServoLoadOrUnloadWrite(int serial_port, uint8_t id, char load){
+  char buf[7];
+  buf[0] = buf[1] = LOBOT_SERVO_FRAME_HEADER;
+  buf[2] = id;
+  buf[3] = 4;
+  buf[4] = LOBOT_SERVO_LOAD_OR_UNLOAD_WRITE;
+  buf[5] = load;
+  buf[6] = LobotCheckSum(buf);
+
+  clear_serial_input(serial_port);
+  write(serial_port, buf, 7);
+}
+
 int LobotSerialServoReadPosition(int serial_port, uint8_t id)
 {
-  
-  int count = 10000;
-  int ret;
+ 
   byte buf[6];
 
   buf[0] = buf[1] = LOBOT_SERVO_FRAME_HEADER;
@@ -144,12 +157,11 @@ int LobotSerialServoReadPosition(int serial_port, uint8_t id)
 
   clear_serial_input(serial_port);
   write(serial_port, buf, 6);
-
   char in_buf[8];
   auto ok = read_with_timeout(serial_port, in_buf, 8);
 
-  if(!ok) fail("failed to read servo position");
-  return BYTE_TO_HW(in_buf[6], in_buf[5]);
+  if(!ok) cout << "failed to read servo position";
+  return (int16_t) BYTE_TO_HW(in_buf[6], in_buf[5]);
 }
 
 
@@ -195,23 +207,71 @@ void config_serial_port(int serial_port) {
   }
 }
 
+void move_smoothly(int serial_port, int servo_id, int end_pos, float seconds)
+{
+  auto start_pos = LobotSerialServoReadPosition(serial_port, servo_id);
+  auto t1 = std::chrono::high_resolution_clock::now();
+  while (true) {
+    auto t2 = std::chrono::high_resolution_clock::now();
+    auto elapsed = std::chrono::duration<double>(t2 - t1).count();
+    if(elapsed>=seconds) {
+      LobotSerialServoMoveTimeWrite(serial_port, servo_id, end_pos, 1);
+      break;
+    }
+    float p = (-cos(elapsed/seconds * M_PI)+1)/2;
+    auto pos = start_pos + p*(end_pos-start_pos);
+    LobotSerialServoMoveTimeWrite(serial_port, servo_id, pos, 1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
+}
 
 void run() {
     // Open the serial port. Change device path as needed (currently set to an standard FTDI USB-UART cable type device)
-  int serial_port = open("/dev/ttyUSB0", O_RDWR);
+  int serial_port = open("/dev/ttyUSB1", O_RDWR);
   config_serial_port(serial_port);
 
-  uint16_t duration = 1000;
+  uint16_t duration = 100;
   int servo_id = 1;
 
-  for(uint16_t position = 0; position <= 1200; position+=100) {
+  int current_position = -1;
+  for(uint16_t position = 0; position <= 800; position+=100) {
     cout << "moving to position: " << position << endl;
     LobotSerialServoMoveTimeWrite(serial_port, servo_id, position, duration);
     for(int i=0; i<100; ++i) {
       std::this_thread::sleep_for (std::chrono::milliseconds(10));
-      auto current_position = LobotSerialServoReadPosition(serial_port, servo_id);
+      current_position = LobotSerialServoReadPosition(serial_port, servo_id);
       cout << "current position: " << current_position << endl;
     }
+  }
+
+  // smooth
+  move_smoothly(serial_port, servo_id, 793, 10);
+  move_smoothly(serial_port, servo_id, 43, 10);
+  move_smoothly(serial_port, servo_id, 793, 10);
+  move_smoothly(serial_port, servo_id, 43, 10);
+
+  move_smoothly(serial_port, servo_id, 793, 3);
+  move_smoothly(serial_port, servo_id, 43, 3);
+  move_smoothly(serial_port, servo_id, 793, 3);
+  move_smoothly(serial_port, servo_id, 43, 3);
+
+  move_smoothly(serial_port, servo_id, 793, 2);
+  move_smoothly(serial_port, servo_id, 43, 2);
+  move_smoothly(serial_port, servo_id, 793, 2);
+  move_smoothly(serial_port, servo_id, 43, 2);
+
+
+  LobotServoLoadOrUnloadWrite(serial_port, servo_id, 0);
+  return;
+  cout << "motor unloaded, in theory can move freely" << endl;
+  int last_position = current_position;
+  while(true) { 
+      auto current_position = LobotSerialServoReadPosition(serial_port, servo_id);
+      if(current_position != last_position) {
+        cout << "manual position: " << current_position << endl;
+        last_position = current_position;
+      }
   }
 
 
