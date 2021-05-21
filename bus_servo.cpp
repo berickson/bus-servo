@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <iomanip>
 
 #include <string>
 #include <thread>
@@ -11,6 +12,7 @@
 #include <string.h>
 #include <cmath>
 #include <cassert>
+
 
 #include <fcntl.h> // Contains file controls like O_RDWR
 #include <errno.h> // Error integer and strerror() function
@@ -368,16 +370,21 @@ bool servo_temp_read(int serial_port, uint8_t servo_id, uint8_t * temp) {
   return read_command_1(SERVO_TEMP_READ, serial_port, servo_id, temp);
 }
 
-bool servo_vin_read(int serial_port, uint8_t servo_id, uint8_t * vin) {
-  return read_command_1(SERVO_VIN_READ, serial_port, servo_id, vin);
+bool servo_vin_read(int serial_port, uint8_t servo_id, uint16_t * vin) {
+  byte param1, param2;
+  auto ok = read_command_2(SERVO_VIN_READ, serial_port, servo_id, &param1, &param2);
+  if(!ok) return false;
+  *vin = BYTE_TO_HW(param2, param1);
+  return true;
+
 }
 
 
-bool servo_pos_read(int serial_port, uint8_t servo_id, uint16_t * position) {
+bool servo_pos_read(int serial_port, uint8_t servo_id, int16_t * position) {
   byte param1, param2;
   bool ok = read_command_2(SERVO_POS_READ, serial_port, servo_id, & param1, & param2);
   if(!ok) return false;
-  *position = BYTE_TO_HW(param2, param1);
+  *position = (int16_t)BYTE_TO_HW(param2, param1);
   return true;
 }
 
@@ -443,11 +450,11 @@ bool servo_led_ctrl_read(int serial_port, uint8_t servo_id, uint8_t * value) {
 // 6 Over voltage and stalled
 // 7 Over voltag. Over temperature and stalled
 void servo_led_error_write(int serial_port, uint8_t servo_id, uint8_t error) {
-  write_command_1(SERVO_LED_CTRL_WRITE, serial_port, servo_id, error);
+  write_command_1(SERVO_LED_ERROR_WRITE, serial_port, servo_id, error);
 }
 
 bool servo_led_error_read(int serial_port, uint8_t servo_id, uint8_t * error) {
-  return read_command_1(SERVO_LED_CTRL_READ, serial_port, servo_id, error);
+  return read_command_1(SERVO_LED_ERROR_READ, serial_port, servo_id, error);
 }
 
 
@@ -495,7 +502,7 @@ void config_serial_port(int serial_port) {
 
 void move_smoothly(int serial_port, int servo_id, int end_pos, float seconds)
 {
-  uint16_t start_pos;
+  int16_t start_pos;
   bool ok = servo_pos_read(serial_port, servo_id, &start_pos);
   if(!ok) fail("couldn't get start servo position");
   auto t1 = std::chrono::high_resolution_clock::now();
@@ -503,13 +510,37 @@ void move_smoothly(int serial_port, int servo_id, int end_pos, float seconds)
     auto t2 = std::chrono::high_resolution_clock::now();
     auto elapsed = std::chrono::duration<double>(t2 - t1).count();
     if(elapsed>=seconds) {
-      servo_move_time_write(serial_port, servo_id, end_pos, 1);
+      servo_move_time_write(serial_port, servo_id, end_pos, 10);
       break;
     }
     float p = (-cos(elapsed/seconds * M_PI)+1)/2;
     auto pos = start_pos + p*(end_pos-start_pos);
-    servo_move_time_write(serial_port, servo_id, pos, 1);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    servo_move_time_write(serial_port, servo_id, pos, 10);
+
+    uint8_t error, temp;
+    int16_t pos_in;
+    uint16_t vin;
+    static int count = 0;
+    ++count;
+    bool ok = servo_vin_read(serial_port, servo_id, &vin);
+    if (ok) {
+      ok = servo_led_error_read(serial_port, servo_id, &error);
+    }
+    if (ok) {
+      ok = servo_temp_read(serial_port, servo_id, &temp);
+    }
+    if (ok) {
+      ok = servo_pos_read(serial_port, servo_id, &pos_in);
+    }
+    if(ok) {
+      if(count%10==0) {
+        cout << "\r"<< "count: " << setw(6) << count << " vin: " << setw(4) << (int)vin << " temp: " << setw(4) << (int)temp <<  " pos: " << setw(4) << pos_in << " error: " << setw(4) << (int)error << std::flush; 
+      }
+    } else {
+      cout << "error reading stats" << endl;
+    }
+
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
   }
 
 }
@@ -518,10 +549,19 @@ void run() {
     // Open the serial port. Change device path as needed (currently set to an standard FTDI USB-UART cable type device)
   int serial_port = open("/dev/ttyUSB0", O_RDWR);
   config_serial_port(serial_port);
+  cout << "running" << endl;
 
   uint16_t duration = 100;
   int servo_id = 1;
   int servo_id2 = 2;
+
+  clear_serial_input(serial_port);
+  servo_vin_limit_write(serial_port, servo_id, 7000, 9000);
+  //servo_led_error_write(serial_port, servo_id, 0);
+  servo_led_ctrl_write(serial_port, servo_id, 1);
+
+/*
+  servo_move_time_write(serial_port, servo_id, 500, 0);
 
   uint16_t current_position = 0;
   for(int16_t position = 0; position <= 800; position+=100) {
@@ -531,7 +571,7 @@ void run() {
 
     for(int i=0; i<100; ++i) {
       std::this_thread::sleep_for (std::chrono::milliseconds(10));
-      uint16_t current_position;
+      int16_t current_position;
       bool ok = servo_pos_read(serial_port, servo_id, &current_position);
       if(!ok) fail("coudn't read servo position");
       cout << "current position: " << current_position << endl;
@@ -546,33 +586,35 @@ void run() {
 
     }
   }
-
+*/
 
   // smooth
 
-  move_smoothly(serial_port, servo_id, 793, 3);
-  move_smoothly(serial_port, servo_id, 43, 3);
-  move_smoothly(serial_port, servo_id2, 793, 3);
-  move_smoothly(serial_port, servo_id2, 43, 3);
+  while(true) {
+    move_smoothly(serial_port, servo_id, 793, 4);
+    move_smoothly(serial_port, servo_id, 43, 4);
+    // move_smoothly(serial_port, servo_id2, 793, 3);
+    // move_smoothly(serial_port, servo_id2, 43, 3);
 
-  move_smoothly(serial_port, servo_id, 793, 2);
-  move_smoothly(serial_port, servo_id, 43, 2);
-  move_smoothly(serial_port, servo_id2, 793, 2);
-  move_smoothly(serial_port, servo_id2, 43, 2);
-
-
-  servo_load_or_unload_write(serial_port, servo_id, 0);
-
-  cout << "motor unloaded, now it can move freely" << endl;
-  int last_position = current_position;
-  while(true) { 
-      bool ok = servo_pos_read(serial_port, servo_id, &current_position);
-      if(!ok) fail("couldn't get start servo position");
-      if(current_position != last_position) {
-        cout << "manual position: " << current_position << endl;
-        last_position = current_position;
-      }
+   // move_smoothly(serial_port, servo_id, 793, 2);
+   // move_smoothly(serial_port, servo_id, 43, 2);
+    // move_smoothly(serial_port, servo_id2, 793, 2);
+    // move_smoothly(serial_port, servo_id2, 43, 2);
   }
+
+
+  // servo_load_or_unload_write(serial_port, servo_id, 0);
+
+  // cout << "motor unloaded, now it can move freely" << endl;
+  // int last_position = current_position;
+  // while(true) { 
+  //     bool ok = servo_pos_read(serial_port, servo_id, &current_position);
+  //     if(!ok) fail("couldn't get start servo position");
+  //     if(current_position != last_position) {
+  //       cout << "manual position: " << current_position << endl;
+  //       last_position = current_position;
+  //     }
+  // }
   close(serial_port);
   return;
 }
