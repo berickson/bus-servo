@@ -98,10 +98,9 @@ void fail(std::string s) {
   throw s;
 }
 
+#include <termios.h> // for tcflush
 void clear_serial_input(int serial_port) {
-    // empty anything on the serial bus;
-  char trash[1000];
-  read(serial_port, &trash, sizeof(trash));
+  tcflush(serial_port, TCIFLUSH); // fastest way to clear serial buffer
 }
 
 
@@ -117,7 +116,6 @@ void write_command_0(ServoCommand cmd, int serial_port, uint8_t servo_id) {
   buf[4] = cmd.id;
   buf[5] = check_sum(buf);
 
-  clear_serial_input(serial_port);
   write(serial_port, buf, buf_length);
 }
 
@@ -132,7 +130,6 @@ void write_command_1(ServoCommand cmd, int serial_port, uint8_t servo_id, byte p
   buf[5] = parameter1;
   buf[6] = check_sum(buf);
 
-  clear_serial_input(serial_port);
   write(serial_port, buf, buf_length);
 }
 
@@ -151,7 +148,6 @@ void write_command_4(ServoCommand cmd, int serial_port, uint8_t servo_id, byte p
   buf[8] = parameter4;
   buf[9] = check_sum(buf);
 
-  clear_serial_input(serial_port);
   write(serial_port, buf, buf_length);
 }
 
@@ -174,12 +170,13 @@ bool read_with_timeout(int serial_port, byte * buf, int len, int timeout_ms = 50
       cout << "read timed out" << endl;
       return false;
     }
-    std::this_thread::sleep_for(std::chrono::microseconds(10));
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
   }
 }
 
 bool read_command_1(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1) {
   write_command_0(cmd, serial_port, servo_id);
+  clear_serial_input(serial_port);
   const int buf_length = 7;
   byte buf[buf_length];
   auto ok = read_with_timeout(serial_port, buf, buf_length);
@@ -191,6 +188,7 @@ bool read_command_1(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byt
 
 bool read_command_2(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1, byte * param2) {
   write_command_0(cmd, serial_port, servo_id);
+  clear_serial_input(serial_port);
   const int buf_length = 8;
   byte buf[buf_length];
   auto ok = read_with_timeout(serial_port, buf, buf_length);
@@ -203,6 +201,7 @@ bool read_command_2(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byt
 
 bool read_command_4(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1, byte *param2, byte* param3, byte* param4) {
   write_command_0(cmd, serial_port, servo_id);
+  clear_serial_input(serial_port);
   const int buf_length = 10;
   byte buf[buf_length];
   auto ok = read_with_timeout(serial_port, buf, buf_length);
@@ -487,8 +486,9 @@ void config_serial_port(int serial_port) {
   // tty.c_oflag &= ~OXTABS; // Prevent conversion of tabs to spaces (NOT PRESENT ON LINUX)
   // tty.c_oflag &= ~ONOEOT; // Prevent removal of C-d chars (0x004) in output (NOT PRESENT ON LINUX)
 
-  tty.c_cc[VTIME] = 0;    // No blocking, return immediately with what is available
-  tty.c_cc[VMIN] = 0;
+  // tty.c_cc[VTIME] = 0;    // No blocking, return immediately with what is available
+  tty.c_cc[VTIME] = 1;    // Tenth's of a second timeout between bytes
+  tty.c_cc[VMIN] = 0;   // return after this number of characters, regardless of number requested 0-unlimited
 
   // Set in/out baud rate to be 115200
   cfsetispeed(&tty, B115200);
@@ -555,7 +555,6 @@ void run() {
   int servo_id = 1;
   int servo_id2 = 2;
 
-  clear_serial_input(serial_port);
   servo_vin_limit_write(serial_port, servo_id, 7000, 9000);
   //servo_led_error_write(serial_port, servo_id, 0);
   servo_led_ctrl_write(serial_port, servo_id, 1);
@@ -594,24 +593,21 @@ void run() {
   move_smoothly(serial_port, servo_id2, 793, 3);
   move_smoothly(serial_port, servo_id2, 43, 3);
 
-  move_smoothly(serial_port, servo_id, 793, 2);
-  move_smoothly(serial_port, servo_id, 43, 2);
-  move_smoothly(serial_port, servo_id2, 793, 2);
-  move_smoothly(serial_port, servo_id2, 43, 2);
-
-
   servo_load_or_unload_write(serial_port, servo_id, 0);
 
   cout << "motor unloaded, now it can move freely" << endl;
   int16_t last_position;
   int16_t current_position;
+  int count = 0;
   while(true) { 
       bool ok = servo_pos_read(serial_port, servo_id, &current_position);
       if(!ok) fail("couldn't get start servo position");
-      if(current_position != last_position) {
-        cout << "manual position: " << current_position << endl;
+      ++count;
+      if(abs(current_position - last_position) > 1 || (count % 1000 == 0) ) {
+        cout << "count: " << count << " position: " << current_position << endl;
         last_position = current_position;
       }
+    // std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   close(serial_port);
   return;
