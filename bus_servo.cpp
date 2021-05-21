@@ -589,32 +589,30 @@ void run() {
 */
 
   // smooth
+  move_smoothly(serial_port, servo_id, 793, 4);
+  move_smoothly(serial_port, servo_id, 43, 4);
+  move_smoothly(serial_port, servo_id2, 793, 3);
+  move_smoothly(serial_port, servo_id2, 43, 3);
 
-  while(true) {
-    move_smoothly(serial_port, servo_id, 793, 4);
-    move_smoothly(serial_port, servo_id, 43, 4);
-    // move_smoothly(serial_port, servo_id2, 793, 3);
-    // move_smoothly(serial_port, servo_id2, 43, 3);
+  move_smoothly(serial_port, servo_id, 793, 2);
+  move_smoothly(serial_port, servo_id, 43, 2);
+  move_smoothly(serial_port, servo_id2, 793, 2);
+  move_smoothly(serial_port, servo_id2, 43, 2);
 
-   // move_smoothly(serial_port, servo_id, 793, 2);
-   // move_smoothly(serial_port, servo_id, 43, 2);
-    // move_smoothly(serial_port, servo_id2, 793, 2);
-    // move_smoothly(serial_port, servo_id2, 43, 2);
+
+  servo_load_or_unload_write(serial_port, servo_id, 0);
+
+  cout << "motor unloaded, now it can move freely" << endl;
+  int16_t last_position;
+  int16_t current_position;
+  while(true) { 
+      bool ok = servo_pos_read(serial_port, servo_id, &current_position);
+      if(!ok) fail("couldn't get start servo position");
+      if(current_position != last_position) {
+        cout << "manual position: " << current_position << endl;
+        last_position = current_position;
+      }
   }
-
-
-  // servo_load_or_unload_write(serial_port, servo_id, 0);
-
-  // cout << "motor unloaded, now it can move freely" << endl;
-  // int last_position = current_position;
-  // while(true) { 
-  //     bool ok = servo_pos_read(serial_port, servo_id, &current_position);
-  //     if(!ok) fail("couldn't get start servo position");
-  //     if(current_position != last_position) {
-  //       cout << "manual position: " << current_position << endl;
-  //       last_position = current_position;
-  //     }
-  // }
   close(serial_port);
   return;
 }
