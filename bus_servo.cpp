@@ -175,8 +175,8 @@ bool read_with_timeout(int serial_port, byte * buf, int len, int timeout_ms = 50
 }
 
 bool read_command_1(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1) {
-  write_command_0(cmd, serial_port, servo_id);
   clear_serial_input(serial_port);
+  write_command_0(cmd, serial_port, servo_id);
   const int buf_length = 7;
   byte buf[buf_length];
   auto ok = read_with_timeout(serial_port, buf, buf_length);
@@ -187,8 +187,8 @@ bool read_command_1(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byt
 }
 
 bool read_command_2(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1, byte * param2) {
-  write_command_0(cmd, serial_port, servo_id);
   clear_serial_input(serial_port);
+  write_command_0(cmd, serial_port, servo_id);
   const int buf_length = 8;
   byte buf[buf_length];
   auto ok = read_with_timeout(serial_port, buf, buf_length);
@@ -200,8 +200,8 @@ bool read_command_2(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byt
 }
 
 bool read_command_4(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1, byte *param2, byte* param3, byte* param4) {
-  write_command_0(cmd, serial_port, servo_id);
   clear_serial_input(serial_port);
+  write_command_0(cmd, serial_port, servo_id);
   const int buf_length = 10;
   byte buf[buf_length];
   auto ok = read_with_timeout(serial_port, buf, buf_length);
@@ -313,7 +313,7 @@ bool servo_angle_offset_read(int serial_port, uint8_t servo_id, int8_t * offset)
 void servo_angle_limit_write(int serial_port, uint8_t servo_id, uint16_t min_position, uint16_t max_position) {
   byte param1 = GET_LOW_BYTE(min_position);
   byte param2 = GET_HIGH_BYTE(min_position);
-  byte param3 = GET_HIGH_BYTE(max_position);
+  byte param3 = GET_LOW_BYTE(max_position);
   byte param4 = GET_HIGH_BYTE(max_position);  
 
   write_command_4(SERVO_ANGLE_LIMIT_WRITE, serial_port, servo_id, param1, param2, param3, param4);
@@ -332,7 +332,7 @@ bool servo_angle_limit_read(int serial_port, uint8_t servo_id, uint16_t * min_po
 void servo_vin_limit_write(int serial_port, uint8_t servo_id, uint16_t min_vin, uint16_t max_vin) {
   byte param1 = GET_LOW_BYTE(min_vin);
   byte param2 = GET_HIGH_BYTE(min_vin);
-  byte param3 = GET_HIGH_BYTE(max_vin);
+  byte param3 = GET_LOW_BYTE(max_vin);
   byte param4 = GET_HIGH_BYTE(max_vin);  
 
   write_command_4(SERVO_VIN_LIMIT_WRITE, serial_port, servo_id, param1, param2, param3, param4);
