@@ -1,0 +1,3 @@
+<launch>
+<node name="bus_servo" pkg="bus_servo" type="bus_servo_node"></node>
+</launch>

@@ -629,15 +629,3 @@ void run() {
   close(serial_port);
   return;
 }
-
-
-
-int main(int argc, char** arv) {
-  try {
-    run();
-  }
-  catch(string s) {
-    cout << "Failed, error caught in main: " << s << endl;
-  }
-  return 0;
-}
