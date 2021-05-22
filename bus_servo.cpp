@@ -534,7 +534,12 @@ void move_smoothly(int serial_port, int servo_id, int end_pos, float seconds)
     }
     if(ok) {
       if(count%10==0) {
-        cout << "\r"<< "count: " << setw(6) << count << " vin: " << setw(4) << (int)vin << " temp: " << setw(4) << (int)temp <<  " pos: " << setw(4) << pos_in << " error: " << setw(4) << (int)error << std::flush; 
+        cout << "\r"<< "servo_id: " << setw(3) << servo_id 
+            << " count: " << setw(6) << count 
+            << " vin: " << setw(4) << (int)vin 
+            << " temp: " << setw(4) << (int)temp 
+            <<  " pos: " << setw(4) << pos_in 
+            << " error: " << setw(4) << (int)error << std::flush; 
       }
     } else {
       cout << "error reading stats" << endl;
@@ -588,14 +593,16 @@ void run() {
 */
 
   // smooth
-  move_smoothly(serial_port, servo_id, 793, 4);
-  move_smoothly(serial_port, servo_id, 43, 4);
-  move_smoothly(serial_port, servo_id2, 793, 3);
-  move_smoothly(serial_port, servo_id2, 43, 3);
+  move_smoothly(serial_port, servo_id, 893, 4);
+  move_smoothly(serial_port, servo_id, 128, 4);
+  move_smoothly(serial_port, servo_id2, 893, 3);
+  move_smoothly(serial_port, servo_id2, 128, 3);
+  move_smoothly(serial_port, servo_id, 500, 3);
+  move_smoothly(serial_port, servo_id2, 500, 3);
 
   servo_load_or_unload_write(serial_port, servo_id, 0);
 
-  cout << "motor unloaded, now it can move freely" << endl;
+  cout << endl << "motor unloaded, now it can move freely" << endl;
   int16_t last_position;
   int16_t current_position;
   int count = 0;
