@@ -18,6 +18,7 @@ catkin_package()
 include_directories(include ${catkin_INCLUDE_DIRS})
 
 add_executable(bus_servo_node src/bus_servo_node.cpp)
+set_property(TARGET bus_servo_node PROPERTY CXX_STANDARD 11)
 target_link_libraries(bus_servo_node ${catkin_LIBRARIES})
 
 

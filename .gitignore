@@ -1,4 +1,7 @@
 build
+build_debug
 .catkin_tools
 devel
+devel_debug
 logs
+logs_debug
