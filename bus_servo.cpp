@@ -5,6 +5,7 @@
 #include <string>
 #include <thread>
 #include <chrono>
+#include <vector>
 
 #include "string.h"
 
@@ -12,6 +13,8 @@
 #include <string.h>
 #include <cmath>
 #include <cassert>
+
+#include "stopwatch.h"
 
 
 #include <fcntl.h> // Contains file controls like O_RDWR
@@ -104,7 +107,7 @@ void clear_serial_input(int serial_port) {
 }
 
 
-// send_command has versions for each parameter lenght
+// send_command has versions for each parameter length
 
 void write_command_0(ServoCommand cmd, int serial_port, uint8_t servo_id) {
   assert(cmd.length==3);
@@ -152,26 +155,48 @@ void write_command_4(ServoCommand cmd, int serial_port, uint8_t servo_id, byte p
 }
 
 // returns true on success
-bool read_with_timeout(int serial_port, byte * buf, int len, int timeout_ms = 50) {
-  auto t1 = std::chrono::high_resolution_clock::now();
+bool read_packet(int serial_port, byte * buf, int len, int timeout_ms = 10) {
 
+  Stopwatch stopwatch;
+  stopwatch.start();
+
+  auto remaining = len;
+  auto p = buf;
 
   while(true) {
-    int i = read(serial_port, buf, len);
-    if(i > 0) {
-      buf+=i;
-      len-=i;
+    int i = read(serial_port, p, len);
+    p+=i;
+    remaining-=i;
+    if(remaining == 0) {
+      break;
     }
-    if(len == 0) {
-      return true;
+    cout << "+" << flush;
+    if(stopwatch.get_elapsed_seconds() > timeout_ms / 1000.) {
+      return false; // timed out
     }
-    auto t2 = std::chrono::high_resolution_clock::now();
-    if(std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() > timeout_ms) {
-      cout << "read timed out" << endl;
-      return false;
-    }
-    std::this_thread::sleep_for(std::chrono::microseconds(100));
   }
+
+  if(buf[0] != SERVO_FRAME_HEADER) {
+    cout << "Invalid frame header received" << endl;
+    return false;
+  }
+
+  if(buf[1] != SERVO_FRAME_HEADER) {
+    cout << "Invalid frame header received" << endl;
+    return false;
+  }
+
+  if(buf[3] != len-3) {
+    cout << "Invalid frame length" << endl;
+    return false;
+  }
+
+  if(buf[len-1] != check_sum(buf)) {
+    cout << "Invalid check sum" << endl;
+    return false;
+  }
+
+  return true;
 }
 
 bool read_command_1(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1) {
@@ -179,7 +204,7 @@ bool read_command_1(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byt
   write_command_0(cmd, serial_port, servo_id);
   const int buf_length = 7;
   byte buf[buf_length];
-  auto ok = read_with_timeout(serial_port, buf, buf_length);
+  auto ok = read_packet(serial_port, buf, buf_length);
   if(!ok)
     return false;
   *param1 = buf[5];
@@ -191,7 +216,7 @@ bool read_command_2(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byt
   write_command_0(cmd, serial_port, servo_id);
   const int buf_length = 8;
   byte buf[buf_length];
-  auto ok = read_with_timeout(serial_port, buf, buf_length);
+  auto ok = read_packet(serial_port, buf, buf_length);
   if(!ok)
     return false;
   *param1 = buf[5];
@@ -204,7 +229,7 @@ bool read_command_4(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byt
   write_command_0(cmd, serial_port, servo_id);
   const int buf_length = 10;
   byte buf[buf_length];
-  auto ok = read_with_timeout(serial_port, buf, buf_length);
+  auto ok = read_packet(serial_port, buf, buf_length);
   if(!ok)
     return false;
   *param1 = buf[5];
@@ -524,9 +549,6 @@ void move_smoothly(int serial_port, int servo_id, int end_pos, float seconds)
     ++count;
     bool ok = servo_vin_read(serial_port, servo_id, &vin);
     if (ok) {
-      ok = servo_led_error_read(serial_port, servo_id, &error);
-    }
-    if (ok) {
       ok = servo_temp_read(serial_port, servo_id, &temp);
     }
     if (ok) {
@@ -539,13 +561,13 @@ void move_smoothly(int serial_port, int servo_id, int end_pos, float seconds)
             << " vin: " << setw(4) << (int)vin 
             << " temp: " << setw(4) << (int)temp 
             <<  " pos: " << setw(4) << pos_in 
-            << " error: " << setw(4) << (int)error << std::flush; 
+            << std::flush; 
       }
     } else {
       cout << "error reading stats" << endl;
     }
 
-    std::this_thread::sleep_for(std::chrono::microseconds(100));
+    // std::this_thread::sleep_for(std::chrono::microseconds(100));
   }
 
 }
@@ -557,57 +579,45 @@ void run() {
   cout << "running" << endl;
 
   uint16_t duration = 100;
-  int servo_id = 1;
+  int servo_id1 = 1;
   int servo_id2 = 2;
 
-  servo_vin_limit_write(serial_port, servo_id, 7000, 9000);
-  //servo_led_error_write(serial_port, servo_id, 0);
-  servo_led_ctrl_write(serial_port, servo_id, 1);
+  // read all servo ids under 10
+  for(int i=0; i< 10; ++i) {
 
-/*
-  servo_move_time_write(serial_port, servo_id, 500, 0);
-
-  uint16_t current_position = 0;
-  for(int16_t position = 0; position <= 800; position+=100) {
-    cout << "moving to position: " << position << endl;
-    servo_move_time_write(serial_port, servo_id, position, duration);
-
-
-    for(int i=0; i<100; ++i) {
-      std::this_thread::sleep_for (std::chrono::milliseconds(10));
-      int16_t current_position;
-      bool ok = servo_pos_read(serial_port, servo_id, &current_position);
-      if(!ok) fail("coudn't read servo position");
-      cout << "current position: " << current_position << endl;
-
-      int16_t position_out;
-      uint16_t duration_out;
-      if(! servo_move_time_read(serial_port, servo_id, &position_out, &duration_out)) {
-        cout << "***** servo_move_time_read FAILED ****** " << endl;
-      } else {
-        cout << "servo_move_time_read returned position: " << position_out << " duration: " << duration_out << endl;
-      }
-
+    byte returned_serial_id;
+    if(servo_id_read(serial_port, i, &returned_serial_id)) {
+      cout << endl << "found servo id " << i << endl;
+    } else {
+      cout << "." << flush;
     }
   }
-*/
+  cout << endl << "done finding servos" << endl;
+
+
+  servo_vin_limit_write(serial_port, servo_id1, 7000, 9000);
+  //servo_led_error_write(serial_port, servo_id, 0);
+  servo_led_ctrl_write(serial_port, servo_id1, 1);
 
   // smooth
-  move_smoothly(serial_port, servo_id, 893, 4);
-  move_smoothly(serial_port, servo_id, 128, 4);
+  move_smoothly(serial_port, servo_id1, 893, 4);
+  move_smoothly(serial_port, servo_id1, 128, 4);
   move_smoothly(serial_port, servo_id2, 893, 3);
   move_smoothly(serial_port, servo_id2, 128, 3);
-  move_smoothly(serial_port, servo_id, 500, 3);
+  move_smoothly(serial_port, servo_id1, 500, 3);
   move_smoothly(serial_port, servo_id2, 500, 3);
 
-  servo_load_or_unload_write(serial_port, servo_id, 0);
+
+  // at same time
+
+  servo_load_or_unload_write(serial_port, servo_id1, 0);
 
   cout << endl << "motor unloaded, now it can move freely" << endl;
   int16_t last_position;
   int16_t current_position;
   int count = 0;
   while(true) { 
-      bool ok = servo_pos_read(serial_port, servo_id, &current_position);
+      bool ok = servo_pos_read(serial_port, servo_id1, &current_position);
       if(!ok) fail("couldn't get start servo position");
       ++count;
       if(abs(current_position - last_position) > 1 || (count % 1000 == 0) ) {
