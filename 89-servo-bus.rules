@@ -1,0 +1,3 @@
+# Example device:
+# Bus 001 Device 007: ID 1a86:7523 QinHeng Electronics HL-340 USB-Serial adapter
+ATTRS{idVendor}=="1a86", , ATTRS{idProduct}=="7523", SYMLINK+="servo-bus"

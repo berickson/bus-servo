@@ -574,7 +574,7 @@ void move_smoothly(int serial_port, int servo_id, int end_pos, float seconds)
 
 void run() {
     // Open the serial port. Change device path as needed (currently set to an standard FTDI USB-UART cable type device)
-  int serial_port = open("/dev/ttyUSB0", O_RDWR);
+  int serial_port = open("/dev/servo-bus", O_RDWR);
   config_serial_port(serial_port);
   cout << "running" << endl;
 
