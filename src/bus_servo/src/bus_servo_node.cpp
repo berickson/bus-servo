@@ -28,8 +28,14 @@ class RosBusServo {
 
   void command_callback(const bus_servo::ServoCommand::ConstPtr& msg) {
     auto &cmd = *msg.get();
+
+    if(std::isnan( cmd.angle) && std::isnan(cmd.max_vel)) {
+      servo_load_or_unload_write(serial_port, servo_id, 0);
+      return;
+    }
+
     int16_t move_pos = cmd.angle;
-    uint16_t move_ms = cmd.max_vel > 0 ? fabs(((position-cmd.angle)/cmd.max_vel)*1000 : 0;
+    uint16_t move_ms = cmd.max_vel > 0 ? fabs((position-cmd.angle)/cmd.max_vel)*1000 : 0;
     servo_move_time_write(serial_port, servo_id, cmd.angle, move_ms);
   }
   
