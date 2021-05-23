@@ -75,7 +75,7 @@ class RosBusServo {
 
 
       diagnostic_msgs::KeyValue voltage_kv;
-      voltage_kv.key = "v_in";
+      voltage_kv.key = "Voltage";
       uint16_t vin;
       if(servo_vin_read(serial_port, servo_id, &vin)) {
         voltage_kv.value = std::to_string(int(vin));
@@ -86,11 +86,11 @@ class RosBusServo {
       uint16_t vin_min, vin_max;
      
       if(servo_vin_limit_read(serial_port, servo_id, &vin_min, &vin_max)) {
-        vin_min_kv.key = "v_in_min";
+        vin_min_kv.key = "Voltage Min Limit";
         vin_min_kv.value = std::to_string(vin_min);
         servo_status.values.push_back(vin_min_kv);
 
-        vin_max_kv.key = "v_in_max";
+        vin_max_kv.key = "Voltage Max Limit";
         vin_max_kv.value = std::to_string(vin_max);
         servo_status.values.push_back(vin_max_kv);
 
@@ -104,6 +104,25 @@ class RosBusServo {
           servo_status.message = "Over Voltage Detected";
         }
       }
+
+      uint8_t temp,temp_max;
+      diagnostic_msgs::KeyValue kv;
+      if(servo_temp_read(serial_port, servo_id, &temp)) {
+        kv.key = "Temp";
+        kv.value = std::to_string(temp);
+        servo_status.values.push_back(kv);
+      }
+      if(servo_temp_max_limit_read(serial_port, servo_id, &temp_max)) {
+        kv.key = "Temp Max Limit";
+        kv.value = std::to_string(temp_max);
+        servo_status.values.push_back(kv);
+      }
+
+      if(temp>temp_max) {
+          servo_status.level = diagnostic_msgs::DiagnosticStatus::WARN;
+          servo_status.message = "Over Temp Detected";
+      }
+    
 
       uint8_t load_mode;
       if(servo_load_or_unload_read(serial_port, servo_id, &load_mode)) {
