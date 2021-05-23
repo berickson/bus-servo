@@ -14,6 +14,8 @@
 #include <cmath>
 #include <cassert>
 
+#include <mutex>
+
 #include "stopwatch.h"
 
 
@@ -53,6 +55,8 @@ struct ServoReadCommand : public ServoCommand {
 
 // sending to this servo_id will be broadcast to all connected servos
 #define BROADCAST_ID 0xFE
+
+std::mutex serial_mutex;
 
 // see Table1 and Table4 of "LewanSoul Bus Servo Communication Protocol.pdf"
 //
@@ -118,7 +122,7 @@ void write_command_0(ServoCommand cmd, int serial_port, uint8_t servo_id) {
   buf[3] = cmd.length;
   buf[4] = cmd.id;
   buf[5] = check_sum(buf);
-
+  const std::lock_guard<std::mutex> lock(serial_mutex);
   write(serial_port, buf, buf_length);
 }
 
@@ -132,7 +136,7 @@ void write_command_1(ServoCommand cmd, int serial_port, uint8_t servo_id, byte p
   buf[4] = cmd.id;
   buf[5] = parameter1;
   buf[6] = check_sum(buf);
-
+  const std::lock_guard<std::mutex> lock(serial_mutex);
   write(serial_port, buf, buf_length);
 }
 
@@ -150,7 +154,7 @@ void write_command_4(ServoCommand cmd, int serial_port, uint8_t servo_id, byte p
   buf[7] = parameter3;
   buf[8] = parameter4;
   buf[9] = check_sum(buf);
-
+  const std::lock_guard<std::mutex> lock(serial_mutex);
   write(serial_port, buf, buf_length);
 }
 
@@ -172,7 +176,9 @@ bool read_packet(int serial_port, byte * buf, int len, int timeout_ms = 10) {
     }
     cout << "+" << flush;
     if(stopwatch.get_elapsed_seconds() > timeout_ms / 1000.) {
+      cout << "read_packet timed out" << flush;
       return false; // timed out
+      
     }
   }
 
@@ -200,6 +206,7 @@ bool read_packet(int serial_port, byte * buf, int len, int timeout_ms = 10) {
 }
 
 bool read_command_1(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1) {
+  const std::lock_guard<std::mutex> lock(serial_mutex);
   clear_serial_input(serial_port);
   write_command_0(cmd, serial_port, servo_id);
   const int buf_length = 7;
@@ -212,6 +219,7 @@ bool read_command_1(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byt
 }
 
 bool read_command_2(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1, byte * param2) {
+  const std::lock_guard<std::mutex> lock(serial_mutex);
   clear_serial_input(serial_port);
   write_command_0(cmd, serial_port, servo_id);
   const int buf_length = 8;
@@ -225,6 +233,7 @@ bool read_command_2(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byt
 }
 
 bool read_command_4(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1, byte *param2, byte* param3, byte* param4) {
+  const std::lock_guard<std::mutex> lock(serial_mutex);
   clear_serial_input(serial_port);
   write_command_0(cmd, serial_port, servo_id);
   const int buf_length = 10;

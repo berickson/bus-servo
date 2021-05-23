@@ -23,13 +23,15 @@ class RosBusServo {
   int serial_port = 0;
   ros::Publisher pub;
   ros::Subscriber sub;
+  bus_servo::ServoCommand command;
+
 
   int16_t position;
 
   void command_callback(const bus_servo::ServoCommand::ConstPtr& msg) {
     auto &cmd = *msg.get();
 
-    if(std::isnan( cmd.angle) && std::isnan(cmd.max_vel)) {
+    if(std::isnan( cmd.angle)) {
       servo_load_or_unload_write(serial_port, servo_id, 0);
       return;
     }
