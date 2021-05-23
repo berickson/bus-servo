@@ -57,13 +57,14 @@ class RosBusServo {
 
 
   void loop() {
+    std_msgs::Float64 msg;
     if(servo_pos_read(serial_port, servo_id, &position)) {
-      std_msgs::Float64 msg;
       msg.data = position;
-      pub.publish(msg);
     } else {
+      msg.data = NAN;
       // ROS_DEBUG_THROTTLE(60, "failed to read servo %d", servo_id);
     }
+    pub.publish(msg);
   }
 
 
