@@ -159,7 +159,7 @@ void write_command_4(ServoCommand cmd, int serial_port, uint8_t servo_id, byte p
 }
 
 // returns true on success
-bool read_packet(int serial_port, byte * buf, int len, int timeout_ms = 10) {
+bool read_packet(int serial_port, byte * buf, int len, int timeout_ms = 2) {
 
   Stopwatch stopwatch;
   stopwatch.start();
@@ -176,9 +176,9 @@ bool read_packet(int serial_port, byte * buf, int len, int timeout_ms = 10) {
     if(remaining == 0) {
       break;
     }
-    cout << "+" << flush;
+    // cout << "+" << flush;
     if(stopwatch.get_elapsed_seconds() > timeout_ms / 1000.) {
-      cout << "read_packet timed out" << flush;
+      // cout << "read_packet timed out" << flush;
       return false; // timed out
       
     }

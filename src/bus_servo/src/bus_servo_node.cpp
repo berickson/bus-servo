@@ -31,7 +31,7 @@ class RosBusServo {
   void command_callback(const bus_servo::ServoCommand::ConstPtr& msg) {
     auto &cmd = *msg.get();
 
-    if(std::isnan( cmd.angle)) {
+    if(std::isnan( cmd.angle) || cmd.max_vel == 0) {
       servo_load_or_unload_write(serial_port, servo_id, 0);
       return;
     }
@@ -76,6 +76,32 @@ class RosBusServo {
       servo_status.level = diagnostic_msgs::DiagnosticStatus::OK;
       servo_status.message = "ok";
 
+      diagnostic_msgs::KeyValue current_position_kv;
+      int16_t position;
+      if(servo_pos_read(serial_port, servo_id, &position)) {
+        current_position_kv.key = "Current Position";
+        current_position_kv.value = std::to_string(position);
+      };
+      servo_status.values.push_back(current_position_kv);
+
+
+      diagnostic_msgs::KeyValue position_min_kv;
+      diagnostic_msgs::KeyValue position_max_kv;
+
+      position_min_kv.key = "Position Min Limit";
+      position_max_kv.key = "Position Max Limit";
+      uint16_t min_position, max_position;
+      if(servo_angle_limit_read(serial_port, servo_id, &min_position, &max_position)) {
+        position_min_kv.value = std::to_string(int(min_position));
+        position_max_kv.value = std::to_string(int(max_position));
+
+      }
+      servo_status.values.push_back(position_min_kv);
+      servo_status.values.push_back(position_max_kv);
+
+
+
+
 
       diagnostic_msgs::KeyValue voltage_kv;
       voltage_kv.key = "Voltage";
@@ -85,7 +111,7 @@ class RosBusServo {
       }
       servo_status.values.push_back(voltage_kv);
 
-      diagnostic_msgs::KeyValue vin_min_kv, vin_max_kv;
+          diagnostic_msgs::KeyValue vin_min_kv, vin_max_kv;
       uint16_t vin_min, vin_max;
      
       if(servo_vin_limit_read(serial_port, servo_id, &vin_min, &vin_max)) {

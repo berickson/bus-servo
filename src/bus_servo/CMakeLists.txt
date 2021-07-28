@@ -34,6 +34,11 @@ add_executable(bus_servo_node src/bus_servo_node.cpp)
 set_property(TARGET bus_servo_node PROPERTY CXX_STANDARD 11)
 target_link_libraries(bus_servo_node ${catkin_LIBRARIES})
 
+add_executable(bus_servo_config src/bus_servo_config.cpp)
+set_property(TARGET bus_servo_node PROPERTY CXX_STANDARD 11)
+target_link_libraries(bus_servo_node ${catkin_LIBRARIES})
+
+
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)

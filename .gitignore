@@ -1,7 +1,10 @@
 build
 build_debug
+build_release
 .catkin_tools
 devel
 devel_debug
+devel_release
 logs
 logs_debug
+logs_release
