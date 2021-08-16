@@ -178,7 +178,14 @@ int run(int argc, char** argv) {
     ros::Publisher diagnostic_pub = nh.advertise<diagnostic_msgs::DiagnosticArray>("/diagnostics", 1);
 
     // open serial port
-    int serial_port = open("/dev/servo-bus", O_RDWR);
+    std::string port_path = "/dev/servo-bus"; 
+    int serial_port = open(port_path.c_str(), O_RDWR);
+
+    if(serial_port == -1) {
+      fail((std::string)"failed to open serial port " + port_path);
+    } 
+    cout << "opened serial port " << port_path << " as " << serial_port << endl;
+
     config_serial_port(serial_port);
 
 

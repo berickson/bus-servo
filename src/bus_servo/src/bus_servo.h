@@ -498,8 +498,9 @@ void config_serial_port(int serial_port) {
   struct termios tty;
 
   // Read in existing settings, and handle any error
-  if(tcgetattr(serial_port, &tty) != 0) {
-    fail("error from tcgetattr");
+  auto rv = tcgetattr(serial_port, &tty);
+  if( rv != 0) {
+    fail("error from tcgetattr " + std::to_string(rv));
   }
 
   tty.c_cflag &= ~PARENB; // Clear parity bit, disabling parity (most common)
@@ -585,7 +586,12 @@ void move_smoothly(int serial_port, int servo_id, int end_pos, float seconds)
 
 void run() {
     // Open the serial port. Change device path as needed (currently set to an standard FTDI USB-UART cable type device)
-  int serial_port = open("/dev/servo-bus", O_RDWR);
+  std::string port_path = "/dev/servo-bus"; 
+  int serial_port = open(port_path.c_str(), O_RDWR);
+  if(serial_port == -1) {
+    fail((std::string)"failed to open serial port " + port_path);
+  }
+  cout << "configuring serial port " << port_path << endl;
   config_serial_port(serial_port);
   cout << "running" << endl;
 
