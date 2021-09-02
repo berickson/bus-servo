@@ -554,7 +554,7 @@ void move_smoothly(int serial_port, int servo_id, int end_pos, float seconds)
     auto pos = start_pos + p*(end_pos-start_pos);
     servo_move_time_write(serial_port, servo_id, pos, 10);
 
-    uint8_t error, temp;
+    uint8_t temp;
     int16_t pos_in;
     uint16_t vin;
     static int count = 0;
@@ -595,7 +595,6 @@ void run() {
   config_serial_port(serial_port);
   cout << "running" << endl;
 
-  uint16_t duration = 100;
   int servo_id1 = 1;
   int servo_id2 = 2;
 

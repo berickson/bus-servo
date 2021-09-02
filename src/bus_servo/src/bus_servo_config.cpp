@@ -4,7 +4,7 @@
 #include <string>
 
 using namespace std;
-int main(int argc, char ** argv) {
+int main(int, char ** ) {
   cout << "This is bus servo config" << endl;
   string usb_port_name = "/dev/servo-bus";
   int serial_port = open(usb_port_name.c_str(), O_RDWR);

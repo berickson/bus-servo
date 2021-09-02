@@ -35,7 +35,6 @@ class RosBusServo {
       return;
     }
 
-    int16_t move_pos = cmd.angle;
     uint16_t move_ms = cmd.max_vel > 0 ? fabs((position-cmd.angle)/cmd.max_vel)*1000 : 0;
     servo_move_time_write(serial_port, servo_id, cmd.angle, move_ms);
   }     
@@ -176,7 +175,7 @@ int run(int argc, char** argv) {
     // initialize ros
     std::string node_name = "bus_servo_node";
     rclcpp::init(argc, argv);
-    auto node = rclcpp::Node::make_shared("node_name");
+    auto node = rclcpp::Node::make_shared(node_name);
     auto diagnostic_pub = node->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 1);
 
     // open serial port
@@ -194,7 +193,7 @@ int run(int argc, char** argv) {
     // initialize servos    
     std::vector<RosBusServo> servos;
     servos.resize(servo_ids.size());
-    for(int i=0; i<servo_ids.size(); ++i) {
+    for(uint i=0; i<servo_ids.size(); ++i) {
       servos[i].init(serial_port, servo_ids[i], node);
     }
 
