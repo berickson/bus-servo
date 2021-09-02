@@ -172,8 +172,21 @@ class RosBusServo {
 
 };
 
+rclcpp::Node::SharedPtr g_node;
+
+// see https://roboticsbackend.com/ros2-rclcpp-parameter-callback/
 rcl_interfaces::msg::SetParametersResult parameters_callback(const std::vector<rclcpp::Parameter> parameters) {
   rcl_interfaces::msg::SetParametersResult result;
+  RCLCPP_INFO(g_node->get_logger(), "parameters callback");
+  result.successful = true;
+  result.reason = "success";
+  cout << "parameters_callback" << endl;
+  for(const auto & parameter : parameters) {
+    cout << "name: " << parameter.get_name() << endl;
+    cout << "type: " << parameter.get_type_name() << endl;
+    cout << "value: " << parameter.value_to_string() << endl;
+    cout << endl;
+  }
   return result;
 }
 
@@ -184,6 +197,7 @@ int run(int argc, char** argv) {
     std::string node_name = "bus_servo_node";
     rclcpp::init(argc, argv);
     auto node = rclcpp::Node::make_shared(node_name);
+    g_node = node;
     auto diagnostic_pub = node->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 1);
 
 
@@ -195,7 +209,9 @@ int run(int argc, char** argv) {
     node->declare_parameter("servo_count", 1, descriptor);
     auto servo_count = node->get_parameter("servo_count").as_int();
 
-    node->add_on_set_parameters_callback(parameters_callback);
+    cout << "registering callback" << endl;
+    auto callback_handle = node->add_on_set_parameters_callback(parameters_callback);
+    cout << "registered callback" << endl;
 
     // auto param_subscriber = std::make_shared<rclcpp::ParameterEventHandler>(node);
 
