@@ -8,3 +8,6 @@ devel_release
 logs
 logs_debug
 logs_release
+.vscode
+src/install
+log
