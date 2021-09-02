@@ -1,34 +1,33 @@
 #include "bus_servo.h"
 
-#include <ros/ros.h>
-#include <diagnostic_msgs/DiagnosticArray.h>
-#include <diagnostic_msgs/DiagnosticStatus.h>
-#include <diagnostic_msgs/KeyValue.h>
-#include "std_msgs/Float64.h"
+#include "rclcpp/rclcpp.hpp"
+#include <diagnostic_msgs/msg/diagnostic_array.hpp>
+#include <diagnostic_msgs/msg/diagnostic_status.hpp>
+#include <diagnostic_msgs/msg/key_value.hpp>
+#include "std_msgs/msg/float64.hpp"
 #include <string>
 #include <sstream>
 #include <vector>
 #include <chrono>
 
-#include "bus_servo/ServoCommand.h"
+#include "bus_servo_interfaces/msg/servo_command.hpp"
 
 
 // handles a single servo
 class RosBusServo {
   public:
-  ros::Publisher publisher;
-  ros::NodeHandle nh;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr publisher;
 
   int servo_id = 0;
   int serial_port = 0;
-  ros::Publisher pub;
-  ros::Subscriber sub;
-  bus_servo::ServoCommand command;
+  rclcpp::Node::SharedPtr node;
+  rclcpp::Subscription<bus_servo_interfaces::msg::ServoCommand>::SharedPtr sub;
+  bus_servo_interfaces::msg::ServoCommand command;
 
 
   int16_t position;
 
-  void command_callback(const bus_servo::ServoCommand::ConstPtr& msg) {
+  void command_callback(const bus_servo_interfaces::msg::ServoCommand::SharedPtr msg) {
     auto &cmd = *msg.get();
 
     if(std::isnan( cmd.angle) || cmd.max_vel == 0) {
@@ -39,44 +38,47 @@ class RosBusServo {
     int16_t move_pos = cmd.angle;
     uint16_t move_ms = cmd.max_vel > 0 ? fabs((position-cmd.angle)/cmd.max_vel)*1000 : 0;
     servo_move_time_write(serial_port, servo_id, cmd.angle, move_ms);
-  }
+  }     
   
 
-  void init(int serial_port, int servo_id) {
+  void init(int serial_port, int servo_id, rclcpp::Node::SharedPtr node) {
     this->serial_port = serial_port;
     this->servo_id = servo_id;
+    this->node = node;
     std::string topic = "/servo" + to_string(servo_id);
-    ROS_INFO("publishing on %s",topic.c_str());
-    auto publisher = nh.advertise<std_msgs::Float64>(topic, 10);
+    RCLCPP_INFO(node->get_logger(), "publishing on %s",topic.c_str());
+    publisher = node->create_publisher<std_msgs::msg::Float64>(topic, 10);
     string cmd_topic = topic+"_cmd";
-    sub = nh.subscribe(cmd_topic, 1, &RosBusServo::command_callback, this);
-    ROS_INFO("listening on %s",cmd_topic.c_str());
     
-    pub = publisher;
+    sub = node->create_subscription<bus_servo_interfaces::msg::ServoCommand>(
+      cmd_topic, 1, std::bind(&RosBusServo::command_callback, this, std::placeholders::_1) );
+
+    RCLCPP_INFO(node->get_logger(), "listening on %s",cmd_topic.c_str());
+    
   }
 
 
   void loop() {
-    std_msgs::Float64 msg;
+    std_msgs::msg::Float64 msg;
     if(servo_pos_read(serial_port, servo_id, &position)) {
       msg.data = position;
     } else {
       msg.data = NAN;
       // ROS_DEBUG_THROTTLE(60, "failed to read servo %d", servo_id);
     }
-    pub.publish(msg);
+    publisher->publish(msg);
   }
 
 
   // adds status for this servo to diag array
-  void get_status(std::string parent_component, diagnostic_msgs::DiagnosticArray & diag_array) {
-      diagnostic_msgs::DiagnosticStatus servo_status;
+  void get_status(std::string parent_component, diagnostic_msgs::msg::DiagnosticArray & diag_array) {
+      diagnostic_msgs::msg::DiagnosticStatus servo_status;
       servo_status.name = parent_component+": Servo " + std::to_string(servo_id);
 
-      servo_status.level = diagnostic_msgs::DiagnosticStatus::OK;
+      servo_status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
       servo_status.message = "ok";
 
-      diagnostic_msgs::KeyValue current_position_kv;
+      diagnostic_msgs::msg::KeyValue current_position_kv;
       int16_t position;
       if(servo_pos_read(serial_port, servo_id, &position)) {
         current_position_kv.key = "Current Position";
@@ -85,8 +87,8 @@ class RosBusServo {
       servo_status.values.push_back(current_position_kv);
 
 
-      diagnostic_msgs::KeyValue position_min_kv;
-      diagnostic_msgs::KeyValue position_max_kv;
+      diagnostic_msgs::msg::KeyValue position_min_kv;
+      diagnostic_msgs::msg::KeyValue position_max_kv;
 
       position_min_kv.key = "Position Min Limit";
       position_max_kv.key = "Position Max Limit";
@@ -103,7 +105,7 @@ class RosBusServo {
 
 
 
-      diagnostic_msgs::KeyValue voltage_kv;
+      diagnostic_msgs::msg::KeyValue voltage_kv;
       voltage_kv.key = "Voltage";
       uint16_t vin;
       if(servo_vin_read(serial_port, servo_id, &vin)) {
@@ -111,7 +113,7 @@ class RosBusServo {
       }
       servo_status.values.push_back(voltage_kv);
 
-          diagnostic_msgs::KeyValue vin_min_kv, vin_max_kv;
+          diagnostic_msgs::msg::KeyValue vin_min_kv, vin_max_kv;
       uint16_t vin_min, vin_max;
      
       if(servo_vin_limit_read(serial_port, servo_id, &vin_min, &vin_max)) {
@@ -124,18 +126,18 @@ class RosBusServo {
         servo_status.values.push_back(vin_max_kv);
 
         if(vin < vin_min) {
-          servo_status.level = diagnostic_msgs::DiagnosticStatus::WARN;
+          servo_status.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
           servo_status.message = "Low Voltage Detected";
         }
 
         if(vin > vin_max) {
-          servo_status.level = diagnostic_msgs::DiagnosticStatus::WARN;
+          servo_status.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
           servo_status.message = "Over Voltage Detected";
         }
       }
 
       uint8_t temp,temp_max;
-      diagnostic_msgs::KeyValue kv;
+      diagnostic_msgs::msg::KeyValue kv;
       if(servo_temp_read(serial_port, servo_id, &temp)) {
         kv.key = "Temp";
         kv.value = std::to_string(temp);
@@ -148,14 +150,14 @@ class RosBusServo {
       }
 
       if(temp>temp_max) {
-          servo_status.level = diagnostic_msgs::DiagnosticStatus::WARN;
+          servo_status.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
           servo_status.message = "Over Temp Detected";
       }
     
 
       uint8_t load_mode;
       if(servo_load_or_unload_read(serial_port, servo_id, &load_mode)) {
-        diagnostic_msgs::KeyValue kv;
+        diagnostic_msgs::msg::KeyValue kv;
 
         kv.key = "Load Mode";
         kv.value = load_mode ? "Powered" : "Unpowered";
@@ -173,9 +175,9 @@ int run(int argc, char** argv) {
 
     // initialize ros
     std::string node_name = "bus_servo_node";
-    ros::init(argc, argv, node_name);
-    ros::NodeHandle nh;
-    ros::Publisher diagnostic_pub = nh.advertise<diagnostic_msgs::DiagnosticArray>("/diagnostics", 1);
+    rclcpp::init(argc, argv);
+    auto node = rclcpp::Node::make_shared("node_name");
+    auto diagnostic_pub = node->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 1);
 
     // open serial port
     std::string port_path = "/dev/servo-bus"; 
@@ -193,13 +195,13 @@ int run(int argc, char** argv) {
     std::vector<RosBusServo> servos;
     servos.resize(servo_ids.size());
     for(int i=0; i<servo_ids.size(); ++i) {
-      servos[i].init(serial_port, servo_ids[i]);
+      servos[i].init(serial_port, servo_ids[i], node);
     }
 
     int loop_hz = 100;
     int64_t loop_count = 0;
-    ros::Rate loop_rate(loop_hz);
-    while(ros::ok()) {
+    rclcpp::Rate loop_rate(loop_hz);
+    while(rclcpp::ok()) {
       ++loop_count;
       for(auto & servo : servos) {
         servo.loop();
@@ -208,12 +210,12 @@ int run(int argc, char** argv) {
       // occasionally publish statistics
       // see https://answers.ros.org/question/262236/publishing-diagnostics-from-c/
       if(loop_count%loop_hz == 0) {
-        diagnostic_msgs::DiagnosticArray diag_array;
-        diagnostic_msgs::DiagnosticStatus bus_status;
+        diagnostic_msgs::msg::DiagnosticArray diag_array;
+        diagnostic_msgs::msg::DiagnosticStatus bus_status;
         bus_status.name = node_name +": Servo Bus";
-        bus_status.level = diagnostic_msgs::DiagnosticStatus::OK;
+        bus_status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
         bus_status.message = "ok";
-        diagnostic_msgs::KeyValue loop_count_kv;
+        diagnostic_msgs::msg::KeyValue loop_count_kv;
         loop_count_kv.key = "loop count";
         loop_count_kv.value = std::to_string(loop_count);
         bus_status.values.push_back(loop_count_kv);
@@ -223,10 +225,10 @@ int run(int argc, char** argv) {
           servo.get_status(node_name, diag_array);
         }
 
-        diagnostic_pub.publish(diag_array);
+        diagnostic_pub->publish(diag_array);
 
       }
-      ros::spinOnce();
+      rclcpp::spin_some(node);
       loop_rate.sleep();
     }
     close(serial_port);

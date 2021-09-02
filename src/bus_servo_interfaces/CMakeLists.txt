@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(bus_servo2)
+project(bus_servo_interfaces)
 
 # Default to C99
 if(NOT CMAKE_C_STANDARD)
@@ -17,21 +17,13 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
-find_package(bus_servo_interfaces REQUIRED)
-find_package(diagnostic_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
 
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/ServoCommand.msg"
+  DEPENDENCIES builtin_interfaces std_msgs
+ )
 
-add_executable(bus_servo_node src/bus_servo_node.cpp)
-ament_target_dependencies(bus_servo_node rclcpp std_msgs diagnostic_msgs bus_servo_interfaces)
-
-add_executable(bus_servo_config src/bus_servo_config.cpp)
-
-
-install(TARGETS
-  bus_servo_node
-  bus_servo_config
-  DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
