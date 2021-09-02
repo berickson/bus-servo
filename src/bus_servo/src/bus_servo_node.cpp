@@ -5,6 +5,9 @@
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
 #include <diagnostic_msgs/msg/key_value.hpp>
 #include "std_msgs/msg/float64.hpp"
+#include "std_msgs/msg/byte_multi_array.hpp"
+#include "rcl_interfaces/msg/parameter_descriptor.hpp"
+#include "rcl_interfaces/msg/integer_range.hpp"
 #include <string>
 #include <sstream>
 #include <vector>
@@ -169,14 +172,37 @@ class RosBusServo {
 
 };
 
+rcl_interfaces::msg::SetParametersResult parameters_callback(const std::vector<rclcpp::Parameter> parameters) {
+  rcl_interfaces::msg::SetParametersResult result;
+  return result;
+}
+
 int run(int argc, char** argv) {
-    std::vector<int> servo_ids = {1,2};
+    std::vector<int64_t> servo_ids = {1,2}; 
 
     // initialize ros
     std::string node_name = "bus_servo_node";
     rclcpp::init(argc, argv);
     auto node = rclcpp::Node::make_shared(node_name);
     auto diagnostic_pub = node->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 1);
+
+
+    rcl_interfaces::msg::ParameterDescriptor descriptor;
+    rcl_interfaces::msg::IntegerRange range;
+    range.set__from_value(0).set__to_value(100).set__step(1);
+    descriptor.integer_range= {range};
+
+    node->declare_parameter("servo_count", 1, descriptor);
+    auto servo_count = node->get_parameter("servo_count").as_int();
+
+    node->add_on_set_parameters_callback(parameters_callback);
+
+    // auto param_subscriber = std::make_shared<rclcpp::ParameterEventHandler>(node);
+
+
+    node->declare_parameter("servo_ids", std::vector<int64_t>{1});
+    servo_ids = node->get_parameter("servo_ids").as_integer_array();
+    
 
     // open serial port
     std::string port_path = "/dev/servo-bus"; 
