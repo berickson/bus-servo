@@ -40,6 +40,7 @@ class RosBusServo {
 
     uint16_t move_ms = cmd.max_vel > 0 ? fabs((position-cmd.angle)/cmd.max_vel)*1000 : 0;
     servo_move_time_write(serial_port, servo_id, cmd.angle, move_ms);
+    cout << "servo " << servo_id << " commanded to " << cmd.angle << " on port " << serial_port << endl;
   }     
   
 
@@ -172,113 +173,165 @@ class RosBusServo {
 
 };
 
-rclcpp::Node::SharedPtr g_node;
 
-// see https://roboticsbackend.com/ros2-rclcpp-parameter-callback/
-rcl_interfaces::msg::SetParametersResult parameters_callback(const std::vector<rclcpp::Parameter> parameters) {
-  rcl_interfaces::msg::SetParametersResult result;
-  RCLCPP_INFO(g_node->get_logger(), "parameters callback");
-  result.successful = true;
-  result.reason = "success";
-  cout << "parameters_callback" << endl;
-  for(const auto & parameter : parameters) {
-    cout << "name: " << parameter.get_name() << endl;
-    cout << "type: " << parameter.get_type_name() << endl;
-    cout << "value: " << parameter.value_to_string() << endl;
-    cout << endl;
-  }
-  return result;
-}
+class BusServoNode {
+  public:
+  rclcpp::Node::SharedPtr node_;
+  bool servo_count_update_pending_ = false;
+  int servo_count = 0;
+  std::vector<RosBusServo> servos;  
+  std::vector<int64_t> servo_ids = {1,2}; 
+  int serial_port = -1;
 
-int run(int argc, char** argv) {
-    std::vector<int64_t> servo_ids = {1,2}; 
-
-    // initialize ros
-    std::string node_name = "bus_servo_node";
-    rclcpp::init(argc, argv);
-    auto node = rclcpp::Node::make_shared(node_name);
-    g_node = node;
-    auto diagnostic_pub = node->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 1);
-
-
-    rcl_interfaces::msg::ParameterDescriptor descriptor;
-    rcl_interfaces::msg::IntegerRange range;
-    range.set__from_value(0).set__to_value(100).set__step(1);
-    descriptor.integer_range= {range};
-
-    node->declare_parameter("servo_count", 1, descriptor);
-    auto servo_count = node->get_parameter("servo_count").as_int();
-
-    cout << "registering callback" << endl;
-    auto callback_handle = node->add_on_set_parameters_callback(parameters_callback);
-    cout << "registered callback" << endl;
-
-    // auto param_subscriber = std::make_shared<rclcpp::ParameterEventHandler>(node);
-
-
-    node->declare_parameter("servo_ids", std::vector<int64_t>{1});
-    servo_ids = node->get_parameter("servo_ids").as_integer_array();
-    
-
-    // open serial port
-    std::string port_path = "/dev/servo-bus"; 
-    int serial_port = open(port_path.c_str(), O_RDWR);
-
-    if(serial_port == -1) {
-      fail((std::string)"failed to open serial port " + port_path);
-    } 
-    cout << "opened serial port " << port_path << " as " << serial_port << endl;
-
-    config_serial_port(serial_port);
-
-
-    // initialize servos    
-    std::vector<RosBusServo> servos;
-    servos.resize(servo_ids.size());
-    for(uint i=0; i<servo_ids.size(); ++i) {
-      servos[i].init(serial_port, servo_ids[i], node);
+  // see https://roboticsbackend.com/ros2-rclcpp-parameter-callback/
+  rcl_interfaces::msg::SetParametersResult parameters_callback(const std::vector<rclcpp::Parameter> parameters) {
+    rcl_interfaces::msg::SetParametersResult result;
+    RCLCPP_INFO(node_->get_logger(), "parameters callback");
+    result.successful = true;
+    result.reason = "success";
+    cout << "parameters_callback" << endl;
+    for(const auto & parameter : parameters) {
+      if(parameter.get_name() == "servo_count") {
+        auto new_servo_count = parameter.as_int();
+        if(new_servo_count != servo_count) {
+          cout << "got a new servo count: " << new_servo_count << endl;
+          servo_count_update_pending_ = true;
+        }
+      }
     }
 
-    int loop_hz = 100;
-    int64_t loop_count = 0;
-    rclcpp::Rate loop_rate(loop_hz);
-    while(rclcpp::ok()) {
-      ++loop_count;
-      for(auto & servo : servos) {
-        servo.loop();
+    for(const auto & parameter : parameters) {
+      cout << "name: " << parameter.get_name() << endl;
+      cout << "type: " << parameter.get_type_name() << endl;
+      cout << "value: " << parameter.value_to_string() << endl;
+      cout << endl;
+    }
+    return result;
+  }
+
+  void update_servo_count() {
+      auto new_servo_count = node_->get_parameter("servo_count").as_int();
+      // todo servo_ids.resize(new_servo_count);
+
+      for(int i = servo_count+1; i <= new_servo_count; ++i) {
+        string fixed_name = "servo"+to_string(i);
+        cout << "adding " << fixed_name << endl;
+        node_->declare_parameter(fixed_name+"/name","servo"+to_string(i));
+
+        rcl_interfaces::msg::ParameterDescriptor id_descriptor;
+        rcl_interfaces::msg::IntegerRange id_range;
+        id_range.set__from_value(0).set__to_value(253).set__step(1);
+        id_descriptor.integer_range= {id_range};
+        id_descriptor.description = "Internal address of the servo to control";
+
+        node_->declare_parameter(fixed_name+"/id", i, id_descriptor);
+      }
+      for(int i = new_servo_count+1; i <= servo_count; ++i) {
+        string fixed_name = "servo"+to_string(i);
+        cout << "adding " << fixed_name << endl;
+        node_->undeclare_parameter(fixed_name+"/name");
+        node_->undeclare_parameter(fixed_name+"/id");
       }
 
-      // occasionally publish statistics
-      // see https://answers.ros.org/question/262236/publishing-diagnostics-from-c/
-      if(loop_count%loop_hz == 0) {
-        diagnostic_msgs::msg::DiagnosticArray diag_array;
-        diagnostic_msgs::msg::DiagnosticStatus bus_status;
-        bus_status.name = node_name +": Servo Bus";
-        bus_status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
-        bus_status.message = "ok";
-        diagnostic_msgs::msg::KeyValue loop_count_kv;
-        loop_count_kv.key = "loop count";
-        loop_count_kv.value = std::to_string(loop_count);
-        bus_status.values.push_back(loop_count_kv);
-        diag_array.status.push_back(bus_status);
+      // initialize servos
+      servos.resize(servo_ids.size());
+      for(uint i=0; i<servo_ids.size(); ++i) {
+        servos[i].init(serial_port, servo_ids[i], node_);
+      }
 
-        for(auto & servo : servos) {
-          servo.get_status(node_name, diag_array);
+      servo_count = new_servo_count;
+      servo_count_update_pending_ = false;
+  }
+
+  int run(int argc, char** argv) {
+
+      // initialize ros
+      std::string node_name = "bus_servo_node";
+      rclcpp::init(argc, argv);
+      auto node = rclcpp::Node::make_shared(node_name);
+      node_ = node;
+      auto diagnostic_pub = node->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 1);
+
+
+      rcl_interfaces::msg::ParameterDescriptor descriptor;
+      rcl_interfaces::msg::IntegerRange range;
+      range.set__from_value(0).set__to_value(100).set__step(1);
+      descriptor.integer_range= {range};
+
+      node->declare_parameter("servo_count", 2, descriptor);
+
+      
+
+      cout << "registering callback" << endl;
+      auto callback_handle = node->add_on_set_parameters_callback(std::bind(&BusServoNode::parameters_callback, this, std::placeholders::_1));
+      cout << "registered callback" << endl;
+
+      // auto param_subscriber = std::make_shared<rclcpp::ParameterEventHandler>(node);
+
+
+      // open serial port
+      std::string port_path = "/dev/servo-bus"; 
+      serial_port = open(port_path.c_str(), O_RDWR);
+
+      if(serial_port == -1) {
+        fail((std::string)"failed to open serial port " + port_path);
+      } 
+      cout << "opened serial port " << port_path << " as " << serial_port << endl;
+
+      config_serial_port(serial_port);
+
+
+      update_servo_count();
+
+
+      int loop_hz = 100;
+      int64_t loop_count = 0;
+      rclcpp::Rate loop_rate(loop_hz);
+      while(rclcpp::ok()) {
+        ++loop_count;
+
+        if(servo_count_update_pending_) {
+          update_servo_count();
         }
 
-        diagnostic_pub->publish(diag_array);
 
+        for(auto & servo : servos) {
+          servo.loop();
+        }
+
+        // occasionally publish statistics
+        // see https://answers.ros.org/question/262236/publishing-diagnostics-from-c/
+        if(loop_count%loop_hz == 0) {
+          diagnostic_msgs::msg::DiagnosticArray diag_array;
+          diagnostic_msgs::msg::DiagnosticStatus bus_status;
+          bus_status.name = node_name +": Servo Bus";
+          bus_status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
+          bus_status.message = "ok";
+          diagnostic_msgs::msg::KeyValue loop_count_kv;
+          loop_count_kv.key = "loop count";
+          loop_count_kv.value = std::to_string(loop_count);
+          bus_status.values.push_back(loop_count_kv);
+          diag_array.status.push_back(bus_status);
+
+          for(auto & servo : servos) {
+            servo.get_status(node_name, diag_array);
+          }
+
+          diagnostic_pub->publish(diag_array);
+
+        }
+        rclcpp::spin_some(node);
+        loop_rate.sleep();
       }
-      rclcpp::spin_some(node);
-      loop_rate.sleep();
-    }
-    close(serial_port);
-    return 0;
-}
+      close(serial_port);
+      return 0;
+  }
+};
 
 int main(int argc, char** argv) {
   try {
-    return run(argc, argv);
+    BusServoNode node;
+    return node.run(argc, argv);
   }
   catch(string s) {
     cout << "Failed, error caught in main: " << s << endl;
