@@ -15,6 +15,7 @@
 
 #include "bus_servo_interfaces/msg/servo_command.hpp"
 
+std::mutex serial_mutex;
 
 // handles a single servo
 class RosBusServo {
@@ -30,17 +31,24 @@ class RosBusServo {
 
   int16_t position;
 
+  static std::mutex callback_mutex;
   void command_callback(const bus_servo_interfaces::msg::ServoCommand::SharedPtr msg) {
+    // const std::lock_guard<std::mutex> lock(callback_mutex);
     auto &cmd = *msg.get();
 
-    if(std::isnan( cmd.angle) || cmd.max_vel == 0) {
-      servo_load_or_unload_write(serial_port, servo_id, 0);
+    if(std::isnan( cmd.angle)) {
+      //servo_load_or_unload_write(serial_port, servo_id, 0);
       return;
-    }
+    } else {
 
-    uint16_t move_ms = cmd.max_vel > 0 ? fabs((position-cmd.angle)/cmd.max_vel)*1000 : 0;
-    servo_move_time_write(serial_port, servo_id, cmd.angle, move_ms);
-    cout << "servo " << servo_id << " commanded to " << cmd.angle << " on port " << serial_port << endl;
+      uint16_t move_ms = cmd.max_vel == 0 ? 0 : fabs((position-cmd.angle)/cmd.max_vel)*1000;
+      servo_move_time_write(serial_port, servo_id, cmd.angle, move_ms);
+      int16_t out_position;
+      uint16_t out_ms;
+
+      servo_move_time_read(serial_port, servo_id, &out_position, &out_ms);
+    }
+    // cout << "servo " << servo_id << " commanded to " << cmd.angle << " on port " << serial_port << endl;
   }     
   
 
@@ -51,7 +59,8 @@ class RosBusServo {
     std::string topic = "/servo" + to_string(servo_id);
     RCLCPP_INFO(node->get_logger(), "publishing on %s",topic.c_str());
     publisher = node->create_publisher<std_msgs::msg::Float64>(topic, 10);
-    string cmd_topic = topic+"_cmd";
+    std::string cmd_topic = "/cmd_servo" + to_string(servo_id);
+
     
     sub = node->create_subscription<bus_servo_interfaces::msg::ServoCommand>(
       cmd_topic, 1, std::bind(&RosBusServo::command_callback, this, std::placeholders::_1) );
@@ -63,13 +72,18 @@ class RosBusServo {
 
   void loop() {
     std_msgs::msg::Float64 msg;
+
     if(servo_pos_read(serial_port, servo_id, &position)) {
       msg.data = position;
     } else {
-      msg.data = NAN;
-      // ROS_DEBUG_THROTTLE(60, "failed to read servo %d", servo_id);
+        msg.data = NAN;
+        rclcpp::Clock clock;
+        // RCLCPP_DEBUG_THROTTLE(node_->get_logger(), clock, 60, "failed to read servo %d", servo_id);
+        RCLCPP_INFO(node->get_logger(), "failed to read servo %d position", servo_id);
     }
-    publisher->publish(msg);
+    if(!isnan(msg.data)) {
+      publisher->publish(msg);
+    }
   }
 
 
@@ -293,7 +307,6 @@ class BusServoNode {
         if(servo_count_update_pending_) {
           update_servo_count();
         }
-
 
         for(auto & servo : servos) {
           servo.loop();

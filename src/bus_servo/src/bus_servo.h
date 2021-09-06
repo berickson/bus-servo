@@ -23,17 +23,17 @@
 #include <errno.h> // Error integer and strerror() function
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <unistd.h> // write(), read(), close()
-
+// #include <cstddef> // std::uint8_t
 
 using namespace std;
 
-typedef uint8_t byte;
+// typedef uint8_t uint8_t;
 
-#define GET_LOW_BYTE(A) (uint8_t)((A))
+#define GET_LOW_uint8_t(A) (uint8_t)((A))
 //Macro function  get lower 8 bits of A
-#define GET_HIGH_BYTE(A) (uint8_t)((A) >> 8)
+#define GET_HIGH_uint8_t(A) (uint8_t)((A) >> 8)
 //Macro function  get higher 8 bits of A
-#define BYTE_TO_HW(A, B) ((((uint16_t)(A)) << 8) | (uint8_t)(B))
+#define uint8_t_TO_HW(A, B) ((((uint16_t)(A)) << 8) | (uint8_t)(B))
 
 struct ServoCommand {
   ServoCommand(char id, int length) : id(id), length(length) {}
@@ -56,7 +56,7 @@ struct ServoReadCommand : public ServoCommand {
 // sending to this servo_id will be broadcast to all connected servos
 #define BROADCAST_ID 0xFE
 
-std::recursive_mutex serial_mutex;
+extern std::mutex serial_mutex;
 
 // see Table1 and Table4 of "LewanSoul Bus Servo Communication Protocol.pdf"
 //
@@ -89,15 +89,15 @@ const ServoReadCommand SERVO_LED_CTRL_READ        (34, 3, 4);
 const ServoCommand     SERVO_LED_ERROR_WRITE      (35, 4);
 const ServoReadCommand SERVO_LED_ERROR_READ       (36, 3, 4);
 
-byte check_sum(byte buf[])
+uint8_t check_sum(uint8_t buf[])
 {
-  byte i;
+  uint8_t i;
   uint16_t temp = 0;
   for (i = 2; i < buf[3] + 2; i++) {
     temp += buf[i];
   }
   temp = ~temp;
-  i = (byte)temp;
+  i = (uint8_t)temp;
   return i;
 }
 
@@ -113,38 +113,53 @@ void clear_serial_input(int serial_port) {
 
 // send_command has versions for each parameter length
 
-void write_command_0(ServoCommand cmd, int serial_port, uint8_t servo_id) {
+void write_command_0_nolock(ServoCommand cmd, int serial_port, uint8_t servo_id) {
   assert(cmd.length==3);
   const int buf_length = 6;
-  byte buf[buf_length];
+  uint8_t buf[buf_length];
   buf[0] = buf[1] = SERVO_FRAME_HEADER;
   buf[2] = servo_id;
   buf[3] = cmd.length;
   buf[4] = cmd.id;
   buf[5] = check_sum(buf);
-  const std::lock_guard<std::recursive_mutex> lock(serial_mutex);
   write(serial_port, buf, buf_length);
 }
 
-void write_command_1(ServoCommand cmd, int serial_port, uint8_t servo_id, byte parameter1) {
+
+void write_command_0(ServoCommand cmd, int serial_port, uint8_t servo_id) {
+  assert(cmd.length==3);
+  const int buf_length = 6;
+  uint8_t buf[buf_length];
+  buf[0] = buf[1] = SERVO_FRAME_HEADER;
+  buf[2] = servo_id;
+  buf[3] = cmd.length;
+  buf[4] = cmd.id;
+  buf[5] = check_sum(buf);
+  const std::lock_guard<std::mutex> lock(serial_mutex);
+  //usleep(5000);
+  write(serial_port, buf, buf_length);
+}
+
+void write_command_1(ServoCommand cmd, int serial_port, uint8_t servo_id, uint8_t parameter1) {
   assert(cmd.length==4);
   const int buf_length = 7;
-  byte buf[buf_length];
+  uint8_t buf[buf_length];
   buf[0] = buf[1] = SERVO_FRAME_HEADER;
   buf[2] = servo_id;
   buf[3] = cmd.length;
   buf[4] = cmd.id;
   buf[5] = parameter1;
   buf[6] = check_sum(buf);
-  const std::lock_guard<std::recursive_mutex> lock(serial_mutex);
+  const std::lock_guard<std::mutex> lock(serial_mutex);
+  //usleep(5000);
   write(serial_port, buf, buf_length);
 }
 
 
-void write_command_4(ServoCommand cmd, int serial_port, uint8_t servo_id, byte parameter1, byte parameter2, byte parameter3, byte parameter4) {
+void write_command_4(ServoCommand cmd, int serial_port, uint8_t servo_id, uint8_t parameter1, uint8_t parameter2, uint8_t parameter3, uint8_t parameter4) {
   assert(cmd.length==7);
   const int buf_length = 10;
-  byte buf[buf_length];
+  uint8_t buf[buf_length];
   buf[0] = buf[1] = SERVO_FRAME_HEADER;
   buf[2] = servo_id;
   buf[3] = cmd.length;
@@ -154,52 +169,82 @@ void write_command_4(ServoCommand cmd, int serial_port, uint8_t servo_id, byte p
   buf[7] = parameter3;
   buf[8] = parameter4;
   buf[9] = check_sum(buf);
-  const std::lock_guard<std::recursive_mutex> lock(serial_mutex);
+  const std::lock_guard<std::mutex> lock(serial_mutex);
+  //usleep(5000);
   write(serial_port, buf, buf_length);
 }
 
 // returns true on success
-bool read_packet(int serial_port, byte * buf, int len, int timeout_ms = 2) {
+bool read_packet(int serial_port, uint8_t * buf, int len, int timeout_ms = 10) {
+  static int reader_count = 0;
+  static int packets_read_count = 0;
+  //usleep(5000);
 
   Stopwatch stopwatch;
   stopwatch.start();
 
   auto remaining = len;
   auto p = buf;
+  auto attempt_count = 0;
 
   while(true) {
-    int i = read(serial_port, p, len);
+    ++reader_count;
+    ++attempt_count;
+    if(reader_count > 1) {
+      cout << "too many packet readers: " << reader_count << endl;
+    }
+    int i = read(serial_port, p, remaining);
+    --reader_count;
     if(i>0) {
       p+=i;
       remaining-=i;
     }
     if(remaining == 0) {
+      ++packets_read_count;
+      if(packets_read_count %1000 == 0) {
+        cout << "read_packet number  " << packets_read_count
+            << " with " << attempt_count 
+            << " attempts in " << stopwatch.get_elapsed_seconds() 
+            << " seconds" << endl;
+      }
       break;
+    }
+    usleep(100);
+    if(remaining < 0) {
+      cout << "logic error in read_packet, remaining was " << remaining << endl;
     }
     // cout << "+" << flush;
     if(stopwatch.get_elapsed_seconds() > timeout_ms / 1000.) {
-      // cout << "read_packet timed out" << flush;
+      cout << "read_packet number"  << packets_read_count
+           << " timed out after " << attempt_count 
+           << " attempts in " << stopwatch.get_elapsed_seconds() 
+           << " seconds" << endl;
+      clear_serial_input(serial_port);
       return false; // timed out
       
     }
   }
 
   if(buf[0] != SERVO_FRAME_HEADER) {
+    clear_serial_input(serial_port);
     cout << "Invalid frame header received" << endl;
     return false;
   }
 
   if(buf[1] != SERVO_FRAME_HEADER) {
+    clear_serial_input(serial_port);
     cout << "Invalid frame header received" << endl;
     return false;
   }
 
   if(buf[3] != len-3) {
+    clear_serial_input(serial_port);
     cout << "Invalid frame length" << endl;
     return false;
   }
 
   if(buf[len-1] != check_sum(buf)) {
+    clear_serial_input(serial_port);
     cout << "Invalid check sum" << endl;
     return false;
   }
@@ -207,12 +252,13 @@ bool read_packet(int serial_port, byte * buf, int len, int timeout_ms = 2) {
   return true;
 }
 
-bool read_command_1(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1) {
-  const std::lock_guard<std::recursive_mutex> lock(serial_mutex);
+bool read_command_1(ServoReadCommand cmd, int serial_port, uint8_t servo_id, uint8_t *param1) {
+  const std::lock_guard<std::mutex> lock(serial_mutex);
+  //usleep(5000);
   clear_serial_input(serial_port);
-  write_command_0(cmd, serial_port, servo_id);
+  write_command_0_nolock(cmd, serial_port, servo_id);
   const int buf_length = 7;
-  byte buf[buf_length];
+  uint8_t buf[buf_length];
   auto ok = read_packet(serial_port, buf, buf_length);
   if(!ok)
     return false;
@@ -220,26 +266,38 @@ bool read_command_1(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byt
   return true;
 }
 
-bool read_command_2(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1, byte * param2) {
-  const std::lock_guard<std::recursive_mutex> lock(serial_mutex);
+bool read_command_2(ServoReadCommand cmd, int serial_port, uint8_t servo_id, uint8_t *param1, uint8_t * param2) {
+  if(!serial_mutex.try_lock()) {
+    cout << "read_command_2 would need to wait for mutex" << endl;
+  } else {
+    serial_mutex.unlock();
+  }
+  
+
+  const std::lock_guard<std::mutex> lock(serial_mutex);
+  //usleep(5000);
   clear_serial_input(serial_port);
-  write_command_0(cmd, serial_port, servo_id);
+  write_command_0_nolock(cmd, serial_port, servo_id);
   const int buf_length = 8;
-  byte buf[buf_length];
+  uint8_t buf[buf_length];
   auto ok = read_packet(serial_port, buf, buf_length);
-  if(!ok)
+  if(!ok) {
+    cout << "read_command_2 failed cmd:" << cmd.id << " port:" << serial_port  << endl;
+    
     return false;
+  }
   *param1 = buf[5];
   *param2 = buf[6];
   return true;
 }
 
-bool read_command_4(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byte *param1, byte *param2, byte* param3, byte* param4) {
-  const std::lock_guard<std::recursive_mutex> lock(serial_mutex);
-  clear_serial_input(serial_port);
-  write_command_0(cmd, serial_port, servo_id);
+bool read_command_4(ServoReadCommand cmd, int serial_port, uint8_t servo_id, uint8_t *param1, uint8_t *param2, uint8_t* param3, uint8_t* param4) {
+  const std::lock_guard<std::mutex> lock(serial_mutex);
+  //usleep(5000);
+  // clear_serial_input(serial_port);
+  write_command_0_nolock(cmd, serial_port, servo_id);
   const int buf_length = 10;
-  byte buf[buf_length];
+  uint8_t buf[buf_length];
   auto ok = read_packet(serial_port, buf, buf_length);
   if(!ok)
     return false;
@@ -252,10 +310,10 @@ bool read_command_4(ServoReadCommand cmd, int serial_port, uint8_t servo_id, byt
 
 void servo_move_time_write(int serial_port, uint8_t servo_id, uint16_t position, uint16_t ms)
 {
-  byte param1 = GET_LOW_BYTE(position);  // lower 8 bits of angle
-  byte param2 = GET_HIGH_BYTE(position); // higher 8 bits of angle
-  byte param3 = GET_LOW_BYTE(ms);        // lower 8 bits of time in ms (0-3000)
-  byte param4 = GET_HIGH_BYTE(ms);       // higher 8 bits of time 
+  uint8_t param1 = GET_LOW_uint8_t(position);  // lower 8 bits of angle
+  uint8_t param2 = GET_HIGH_uint8_t(position); // higher 8 bits of angle
+  uint8_t param3 = GET_LOW_uint8_t(ms);        // lower 8 bits of time in ms (0-3000)
+  uint8_t param4 = GET_HIGH_uint8_t(ms);       // higher 8 bits of time 
 
   write_command_4(SERVO_MOVE_TIME_WRITE, serial_port, servo_id, param1, param2, param3, param4);
 }
@@ -269,21 +327,21 @@ bool servo_move_time_read(int serial_port, uint8_t servo_id, int16_t * position,
   Parameter 4: higher 8 bits of time value, range 0~30000ms
   */
   const auto cmd = SERVO_MOVE_TIME_READ;
-  byte param1, param2, param3, param4;
+  uint8_t param1, param2, param3, param4;
   bool ok = read_command_4(cmd, serial_port, servo_id, &param1, &param2, &param3, &param4);
   if(!ok) return false;
 
-  *position = (int16_t) BYTE_TO_HW(param2, param1);
-  *ms = BYTE_TO_HW(param4, param3);
+  *position = (int16_t) uint8_t_TO_HW(param2, param1);
+  *ms = uint8_t_TO_HW(param4, param3);
   return true;
 }
 
 void servo_move_time_wait_write(int serial_port, uint8_t servo_id, uint16_t position, uint16_t ms)
 {
-  byte param1 = GET_LOW_BYTE(position);  // lower 8 bits of angle
-  byte param2 = GET_HIGH_BYTE(position); // higher 8 bits of angle
-  byte param3 = GET_LOW_BYTE(ms);        // lower 8 bits of time in ms (0-3000)
-  byte param4 = GET_HIGH_BYTE(ms);       // higher 8 bits of time 
+  uint8_t param1 = GET_LOW_uint8_t(position);  // lower 8 bits of angle
+  uint8_t param2 = GET_HIGH_uint8_t(position); // higher 8 bits of angle
+  uint8_t param3 = GET_LOW_uint8_t(ms);        // lower 8 bits of time in ms (0-3000)
+  uint8_t param4 = GET_HIGH_uint8_t(ms);       // higher 8 bits of time 
 
   write_command_4(SERVO_MOVE_TIME_WAIT_WRITE, serial_port, servo_id, param1, param2, param3, param4);
 }
@@ -297,12 +355,12 @@ bool servo_move_time_wait_read(int serial_port, uint8_t servo_id, int16_t * posi
   Parameter 4: higher 8 bits of time value, range 0~30000ms
   */
   const auto cmd = SERVO_MOVE_TIME_WAIT_READ;
-  byte param1, param2, param3, param4;
+  uint8_t param1, param2, param3, param4;
   bool ok = read_command_4(cmd, serial_port, servo_id, &param1, &param2, &param3, &param4);
   if(!ok) return false;
 
-  *position = (int16_t) BYTE_TO_HW(param2, param1);
-  *ms = BYTE_TO_HW(param4, param3);
+  *position = (int16_t) uint8_t_TO_HW(param2, param1);
+  *ms = uint8_t_TO_HW(param4, param3);
   return true;
 }
 
@@ -340,46 +398,46 @@ void servo_angle_offset_write(int serial_port, uint8_t servo_id) {
 }
 
 bool servo_angle_offset_read(int serial_port, uint8_t servo_id, int8_t * offset) {
-  return read_command_1(SERVO_ANGLE_OFFSET_READ, serial_port, servo_id, (byte *)offset);
+  return read_command_1(SERVO_ANGLE_OFFSET_READ, serial_port, servo_id, (uint8_t *)offset);
 }
 
 // min and max positio must be in range 0-1000
 // min must be less that max
 // saves on power down
 void servo_angle_limit_write(int serial_port, uint8_t servo_id, uint16_t min_position, uint16_t max_position) {
-  byte param1 = GET_LOW_BYTE(min_position);
-  byte param2 = GET_HIGH_BYTE(min_position);
-  byte param3 = GET_LOW_BYTE(max_position);
-  byte param4 = GET_HIGH_BYTE(max_position);  
+  uint8_t param1 = GET_LOW_uint8_t(min_position);
+  uint8_t param2 = GET_HIGH_uint8_t(min_position);
+  uint8_t param3 = GET_LOW_uint8_t(max_position);
+  uint8_t param4 = GET_HIGH_uint8_t(max_position);  
 
   write_command_4(SERVO_ANGLE_LIMIT_WRITE, serial_port, servo_id, param1, param2, param3, param4);
 }
 
 bool servo_angle_limit_read(int serial_port, uint8_t servo_id, uint16_t * min_position, uint16_t * max_position) {
-  byte param1, param2, param3, param4;
+  uint8_t param1, param2, param3, param4;
   bool ok =  read_command_4(SERVO_ANGLE_LIMIT_READ, serial_port, servo_id, & param1, & param2, & param3, & param4);
   if(!ok) return false;
-  *min_position = BYTE_TO_HW(param2, param1);
-  *max_position = BYTE_TO_HW(param4, param3);
+  *min_position = uint8_t_TO_HW(param2, param1);
+  *max_position = uint8_t_TO_HW(param4, param3);
   return true;
 }
 
 
 void servo_vin_limit_write(int serial_port, uint8_t servo_id, uint16_t min_vin, uint16_t max_vin) {
-  byte param1 = GET_LOW_BYTE(min_vin);
-  byte param2 = GET_HIGH_BYTE(min_vin);
-  byte param3 = GET_LOW_BYTE(max_vin);
-  byte param4 = GET_HIGH_BYTE(max_vin);  
+  uint8_t param1 = GET_LOW_uint8_t(min_vin);
+  uint8_t param2 = GET_HIGH_uint8_t(min_vin);
+  uint8_t param3 = GET_LOW_uint8_t(max_vin);
+  uint8_t param4 = GET_HIGH_uint8_t(max_vin);  
 
   write_command_4(SERVO_VIN_LIMIT_WRITE, serial_port, servo_id, param1, param2, param3, param4);
 }
 
 bool servo_vin_limit_read(int serial_port, uint8_t servo_id, uint16_t * min_vin, uint16_t * max_vin) {
-  byte param1, param2, param3, param4;
+  uint8_t param1, param2, param3, param4;
   bool ok =  read_command_4(SERVO_VIN_LIMIT_READ, serial_port, servo_id, & param1, & param2, & param3, & param4);
   if(!ok) return false;
-  *min_vin = BYTE_TO_HW(param2, param1);
-  *max_vin = BYTE_TO_HW(param4, param3);
+  *min_vin = uint8_t_TO_HW(param2, param1);
+  *max_vin = uint8_t_TO_HW(param4, param3);
   return true;
 }
 
@@ -406,39 +464,39 @@ bool servo_temp_read(int serial_port, uint8_t servo_id, uint8_t * temp) {
 }
 
 bool servo_vin_read(int serial_port, uint8_t servo_id, uint16_t * vin) {
-  byte param1, param2;
+  uint8_t param1, param2;
   auto ok = read_command_2(SERVO_VIN_READ, serial_port, servo_id, &param1, &param2);
   if(!ok) return false;
-  *vin = BYTE_TO_HW(param2, param1);
+  *vin = uint8_t_TO_HW(param2, param1);
   return true;
 
 }
 
 
 bool servo_pos_read(int serial_port, uint8_t servo_id, int16_t * position) {
-  byte param1, param2;
+  uint8_t param1, param2;
   bool ok = read_command_2(SERVO_POS_READ, serial_port, servo_id, & param1, & param2);
   if(!ok) return false;
-  *position = (int16_t)BYTE_TO_HW(param2, param1);
+  *position = (int16_t)uint8_t_TO_HW(param2, param1);
   return true;
 }
 
 // mode 0 is servo, 1 is motor
 // speed is in range -1000,1000 (tbd: units)
-void servo_or_motor_mode_write(int serial_port, uint8_t servo_id, byte mode, int16_t speed ) {
-  byte param1 = mode;
-  byte param2 = 0; // unused
-  byte param3 = GET_LOW_BYTE(speed);
-  byte param4 = GET_HIGH_BYTE(speed);
+void servo_or_motor_mode_write(int serial_port, uint8_t servo_id, uint8_t mode, int16_t speed ) {
+  uint8_t param1 = mode;
+  uint8_t param2 = 0; // unused
+  uint8_t param3 = GET_LOW_uint8_t(speed);
+  uint8_t param4 = GET_HIGH_uint8_t(speed);
   write_command_4(SERVO_OR_MOTOR_MODE_WRITE, serial_port, servo_id, param1, param2, param3, param4);
 }
 
-bool servo_or_motor_mode_read(int serial_port, uint8_t servo_id, byte * mode, int16_t * speed ) {
-  byte param1, param2, param3, param4;
+bool servo_or_motor_mode_read(int serial_port, uint8_t servo_id, uint8_t * mode, int16_t * speed ) {
+  uint8_t param1, param2, param3, param4;
   bool ok = read_command_4(SERVO_OR_MOTOR_MODE_READ, serial_port, servo_id, &param1, & param2, &param3, &param4);
   if(!ok) return false;
   *mode = param1;
-  *speed = (int16_t)BYTE_TO_HW(param4, param3);
+  *speed = (int16_t)uint8_t_TO_HW(param4, param3);
   return true;
 }
 
@@ -506,7 +564,7 @@ void config_serial_port(int serial_port) {
   tty.c_cflag &= ~PARENB; // Clear parity bit, disabling parity (most common)
   tty.c_cflag &= ~CSTOPB; // Clear stop field, only one stop bit used in communication (most common)
   tty.c_cflag &= ~CSIZE; // Clear all bits that set the data size 
-  tty.c_cflag |= CS8; // 8 bits per byte (most common)
+  tty.c_cflag |= CS8; // 8 bits per uint8_t (most common)
   tty.c_cflag &= ~CRTSCTS; // Disable RTS/CTS hardware flow control (most common)
   tty.c_cflag |= CREAD | CLOCAL; // Turn on READ & ignore ctrl lines (CLOCAL = 1)
 
@@ -516,15 +574,15 @@ void config_serial_port(int serial_port) {
   tty.c_lflag &= ~ECHONL; // Disable new-line echo
   tty.c_lflag &= ~ISIG; // Disable interpretation of INTR, QUIT and SUSP
   tty.c_iflag &= ~(IXON | IXOFF | IXANY); // Turn off s/w flow ctrl
-  tty.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL); // Disable any special handling of received bytes
+  tty.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL); // Disable any special handling of received uint8_ts
 
-  tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
+  tty.c_oflag &= ~OPOST; // Prevent special interpretation of output uint8_ts (e.g. newline chars)
   tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
   // tty.c_oflag &= ~OXTABS; // Prevent conversion of tabs to spaces (NOT PRESENT ON LINUX)
   // tty.c_oflag &= ~ONOEOT; // Prevent removal of C-d chars (0x004) in output (NOT PRESENT ON LINUX)
 
-  // tty.c_cc[VTIME] = 0;    // No blocking, return immediately with what is available
-  tty.c_cc[VTIME] = 1;    // Tenth's of a second timeout between bytes
+  tty.c_cc[VTIME] = 0;    // No blocking, return immediately with what is available
+  // tty.c_cc[VTIME] = 1;    // Tenth's of a second timeout between uint8_ts
   tty.c_cc[VMIN] = 0;   // return after this number of characters, regardless of number requested 0-unlimited
 
   // Set in/out baud rate to be 115200
@@ -601,7 +659,7 @@ void run() {
   // read all servo ids under 10
   for(int i=0; i< 10; ++i) {
 
-    byte returned_serial_id;
+    uint8_t returned_serial_id;
     if(servo_id_read(serial_port, i, &returned_serial_id)) {
       cout << endl << "found servo id " << i << endl;
     } else {

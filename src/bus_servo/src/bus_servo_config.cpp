@@ -2,6 +2,8 @@
 
 #include <iostream>
 #include <string>
+// #include <cstddef> // byte
+std::mutex serial_mutex;
 
 using namespace std;
 int main(int, char ** ) {
@@ -9,6 +11,24 @@ int main(int, char ** ) {
   string usb_port_name = "/dev/servo-bus";
   int serial_port = open(usb_port_name.c_str(), O_RDWR);
   config_serial_port(serial_port);
+
+  {
+    int i = 0;
+    while(true) {
+      ++i;
+      int16_t position;
+
+      for(auto servo_id : {2}) {
+        if(servo_pos_read(serial_port, servo_id, &position)) {
+          if(i%100==0)
+            cout << "." << flush;
+        } else {
+          cout << "failed" << flush;
+        }
+        servo_move_time_write(serial_port, servo_id, (i%400)+300, 1);
+      }
+    }
+  }
 
 
   // list all connected servos
