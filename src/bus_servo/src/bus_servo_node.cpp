@@ -14,6 +14,7 @@
 #include <chrono>
 
 #include "bus_servo_interfaces/msg/servo_command.hpp"
+#include "bus_servo_interfaces/srv/servo_move_time_write.hpp"
 
 std::mutex serial_mutex;
 
@@ -27,6 +28,7 @@ class RosBusServo {
   rclcpp::Node::SharedPtr node;
   rclcpp::Subscription<bus_servo_interfaces::msg::ServoCommand>::SharedPtr sub;
   bus_servo_interfaces::msg::ServoCommand command;
+  rclcpp::Service<bus_servo_interfaces::srv::ServoMoveTimeWrite>::SharedPtr servo_move_time_write_service;
 
 
   int16_t position;
@@ -49,7 +51,15 @@ class RosBusServo {
       servo_move_time_read(serial_port, servo_id, &out_position, &out_ms);
     }
     // cout << "servo " << servo_id << " commanded to " << cmd.angle << " on port " << serial_port << endl;
-  }     
+  }
+
+  void servo_move_time_write_callback(
+      const std::shared_ptr<bus_servo_interfaces::srv::ServoMoveTimeWrite_Request> request,
+      std::shared_ptr<bus_servo_interfaces::srv::ServoMoveTimeWrite_Response>  response)
+  {
+    servo_move_time_write(serial_port, servo_id, request->position , request->ms);
+  }
+
   
 
   void init(int serial_port, int servo_id, rclcpp::Node::SharedPtr node) {
@@ -64,6 +74,10 @@ class RosBusServo {
     
     sub = node->create_subscription<bus_servo_interfaces::msg::ServoCommand>(
       cmd_topic, 1, std::bind(&RosBusServo::command_callback, this, std::placeholders::_1) );
+
+    servo_move_time_write_service = node->create_service<bus_servo_interfaces::srv::ServoMoveTimeWrite>(
+      topic + "/servo_move_time_write",  
+      std::bind(&RosBusServo::servo_move_time_write_callback, this, std::placeholders::_1, std::placeholders::_2 ));
 
     RCLCPP_INFO(node->get_logger(), "listening on %s",cmd_topic.c_str());
     
