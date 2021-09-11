@@ -29,8 +29,8 @@ class SquarePublisher(Node):
 
     def __init__(self):
         super().__init__('square_publisher')
-        self.yaw_publisher = self.create_publisher(ServoCommand, '/cmd_servo1', 1)
-        self.pitch_publisher = self.create_publisher(ServoCommand, '/cmd_servo2', 1)
+        self.yaw_publisher = self.create_publisher(ServoCommand, '/servo_cmd/yaw', 1)
+        self.pitch_publisher = self.create_publisher(ServoCommand, '/servo_cmd/pitch', 1)
         self.timer_period = 0.01 # seconds
         self.look_ahead_time = 0.001 # seconds
         self.timer = self.create_timer(self.timer_period, self.timer_callback)
@@ -47,19 +47,19 @@ class SquarePublisher(Node):
 
         self.yaw_subscription = self.create_subscription(
             Float64,
-            '/servo1',
+            '/servo/yaw',
             self.yaw_callback,
             10)
         self.pitch_subscription = self.create_subscription(
             Float64,
-            '/servo2',
+            '/servo/pitch',
             self.pitch_callback,
             10)
 
-        self.servo1_move_time_write_client = self.create_client(ServoMoveTimeWrite, "/servo1/servo_move_time_write")
+        self.servo1_move_time_write_client = self.create_client(ServoMoveTimeWrite, "/servo/yaw/servo_move_time_write")
         while not self.servo1_move_time_write_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('service not available, waiting again...')
-        self.servo2_move_time_write_client = self.create_client(ServoMoveTimeWrite, "/servo2/servo_move_time_write")
+        self.servo2_move_time_write_client = self.create_client(ServoMoveTimeWrite, "/servo/pitch/servo_move_time_write")
         while not self.servo1_move_time_write_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('service not available, waiting again...')
 

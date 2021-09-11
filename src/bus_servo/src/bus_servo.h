@@ -202,12 +202,12 @@ bool read_packet(int serial_port, uint8_t * buf, int len, int timeout_ms = 10) {
     }
     if(remaining == 0) {
       ++packets_read_count;
-      if(packets_read_count %1000 == 0) {
-        cout << "read_packet number  " << packets_read_count
-            << " with " << attempt_count 
-            << " attempts in " << stopwatch.get_elapsed_seconds() 
-            << " seconds" << endl;
-      }
+      // if(packets_read_count %1000 == 0) {
+      //   cout << "read_packet number  " << packets_read_count
+      //       << " with " << attempt_count 
+      //       << " attempts in " << stopwatch.get_elapsed_seconds() 
+      //       << " seconds" << endl;
+      // }
       break;
     }
     usleep(100);
@@ -216,10 +216,10 @@ bool read_packet(int serial_port, uint8_t * buf, int len, int timeout_ms = 10) {
     }
     // cout << "+" << flush;
     if(stopwatch.get_elapsed_seconds() > timeout_ms / 1000.) {
-      cout << "read_packet number"  << packets_read_count
-           << " timed out after " << attempt_count 
-           << " attempts in " << stopwatch.get_elapsed_seconds() 
-           << " seconds" << endl;
+      // cout << "read_packet number"  << packets_read_count
+      //      << " timed out after " << attempt_count 
+      //      << " attempts in " << stopwatch.get_elapsed_seconds() 
+      //      << " seconds" << endl;
       clear_serial_input(serial_port);
       return false; // timed out
       
@@ -283,7 +283,7 @@ bool read_command_2(ServoReadCommand cmd, int serial_port, uint8_t servo_id, uin
   uint8_t buf[buf_length];
   auto ok = read_packet(serial_port, buf, buf_length);
   if(!ok) {
-    cout << "read_command_2 failed cmd:" << cmd.id << " port:" << serial_port  << endl;
+    // cout << "read_command_2 failed cmd:" << cmd.id << " port:" << serial_port  << endl;
     
     return false;
   }

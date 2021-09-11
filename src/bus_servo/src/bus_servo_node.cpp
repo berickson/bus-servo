@@ -28,6 +28,8 @@ class RosBusServo {
   int64_t ok_read_count = 0;
   int64_t failed_read_count = 0;
   rclcpp::Node::SharedPtr node;
+  string name;
+  string fixed_name;
   rclcpp::Subscription<bus_servo_interfaces::msg::ServoCommand>::SharedPtr sub;
   bus_servo_interfaces::msg::ServoCommand command;
   rclcpp::Service<bus_servo_interfaces::srv::ServoMoveTimeWrite>::SharedPtr servo_move_time_write_service;
@@ -57,21 +59,23 @@ class RosBusServo {
 
   void servo_move_time_write_callback(
       const std::shared_ptr<bus_servo_interfaces::srv::ServoMoveTimeWrite_Request> request,
-      std::shared_ptr<bus_servo_interfaces::srv::ServoMoveTimeWrite_Response>  response)
+      std::shared_ptr<bus_servo_interfaces::srv::ServoMoveTimeWrite_Response> /* response */)
   {
     servo_move_time_write(serial_port, servo_id, request->position , request->ms);
   }
 
   
 
-  void init(int serial_port, int servo_id, rclcpp::Node::SharedPtr node) {
+  void init(int serial_port, string fixed_name, string name, int servo_id,rclcpp::Node::SharedPtr node) {
+    this->name = name;
+    this->fixed_name = fixed_name;
     this->serial_port = serial_port;
     this->servo_id = servo_id;
     this->node = node;
-    std::string topic = "/servo" + to_string(servo_id);
+    std::string topic = "/servo/"+ name;
     RCLCPP_INFO(node->get_logger(), "publishing on %s",topic.c_str());
     publisher = node->create_publisher<std_msgs::msg::Float64>(topic, 10);
-    std::string cmd_topic = "/cmd_servo" + to_string(servo_id);
+    std::string cmd_topic = "/servo_cmd/" + name;
 
     
     sub = node->create_subscription<bus_servo_interfaces::msg::ServoCommand>(
@@ -96,7 +100,6 @@ class RosBusServo {
         ++failed_read_count;
         msg.data = NAN;
         rclcpp::Clock clock;
-        // RCLCPP_DEBUG_THROTTLE(node_->get_logger(), clock, 60, "failed to read servo %d", servo_id);
         RCLCPP_DEBUG(node->get_logger(), "failed to read servo %d position", servo_id);
     }
     if(!isnan(msg.data)) {
@@ -106,9 +109,9 @@ class RosBusServo {
 
 
   // adds status for this servo to diag array
-  void get_status(std::string parent_component, diagnostic_msgs::msg::DiagnosticArray & diag_array) {
+  void get_diagnostics(std::string parent_component, diagnostic_msgs::msg::DiagnosticArray & diag_array) {
       diagnostic_msgs::msg::DiagnosticStatus servo_status;
-      servo_status.name = parent_component+": Servo " + std::to_string(servo_id);
+      servo_status.name = parent_component+":  " + fixed_name +"("+this->name+")";
 
       servo_status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
       servo_status.message = "ok";
@@ -223,10 +226,8 @@ class RosBusServo {
 class BusServoNode {
   public:
   rclcpp::Node::SharedPtr node_;
-  bool servo_count_update_pending_ = false;
-  int servo_count = 0;
+  bool param_update_pending_ = false;
   std::vector<RosBusServo> servos;  
-  std::vector<int64_t> servo_ids = {1,2}; 
   int serial_port = -1;
 
   // see https://roboticsbackend.com/ros2-rclcpp-parameter-callback/
@@ -235,58 +236,48 @@ class BusServoNode {
     RCLCPP_INFO(node_->get_logger(), "parameters callback");
     result.successful = true;
     result.reason = "success";
-    cout << "parameters_callback" << endl;
-    for(const auto & parameter : parameters) {
-      if(parameter.get_name() == "servo_count") {
-        auto new_servo_count = parameter.as_int();
-        if(new_servo_count != servo_count) {
-          cout << "got a new servo count: " << new_servo_count << endl;
-          servo_count_update_pending_ = true;
-        }
-      }
-    }
 
-    for(const auto & parameter : parameters) {
-      cout << "name: " << parameter.get_name() << endl;
-      cout << "type: " << parameter.get_type_name() << endl;
-      cout << "value: " << parameter.value_to_string() << endl;
-      cout << endl;
-    }
+    param_update_pending_ = true;
     return result;
   }
 
-  void update_servo_count() {
-      auto new_servo_count = node_->get_parameter("servo_count").as_int();
-      // todo servo_ids.resize(new_servo_count);
+  void update_from_parameters() {
 
-      for(int i = servo_count+1; i <= new_servo_count; ++i) {
-        string fixed_name = "servo"+to_string(i);
-        cout << "adding " << fixed_name << endl;
-        node_->declare_parameter(fixed_name+"/name","servo"+to_string(i));
+    // add or remove parameters based on servo_count
+    auto old_servo_count = servos.size();
+    auto new_servo_count = node_->get_parameter("servo_count").as_int();
 
-        rcl_interfaces::msg::ParameterDescriptor id_descriptor;
-        rcl_interfaces::msg::IntegerRange id_range;
-        id_range.set__from_value(0).set__to_value(253).set__step(1);
-        id_descriptor.integer_range= {id_range};
-        id_descriptor.description = "Internal address of the servo to control";
+    for(int i = old_servo_count+1; i <= new_servo_count; ++i) {
+      string fixed_name = "servo"+to_string(i);
+      cout << "adding " << fixed_name << endl;
+      node_->declare_parameter(fixed_name+"/name","servo"+to_string(i));
 
-        node_->declare_parameter(fixed_name+"/id", i, id_descriptor);
-      }
-      for(int i = new_servo_count+1; i <= servo_count; ++i) {
-        string fixed_name = "servo"+to_string(i);
-        cout << "adding " << fixed_name << endl;
-        node_->undeclare_parameter(fixed_name+"/name");
-        node_->undeclare_parameter(fixed_name+"/id");
-      }
+      rcl_interfaces::msg::ParameterDescriptor id_descriptor;
+      rcl_interfaces::msg::IntegerRange id_range;
+      id_range.set__from_value(0).set__to_value(253).set__step(1);
+      id_descriptor.integer_range= {id_range};
+      id_descriptor.description = "Internal address of the servo to control";
 
-      // initialize servos
-      servos.resize(servo_ids.size());
-      for(uint i=0; i<servo_ids.size(); ++i) {
-        servos[i].init(serial_port, servo_ids[i], node_);
-      }
+      node_->declare_parameter(fixed_name+"/id", i, id_descriptor);
+    }
+    for(int i = new_servo_count+1; i <= old_servo_count; ++i) {
+      string fixed_name = "servo"+to_string(i);
+      cout << "adding " << fixed_name << endl;
+      node_->undeclare_parameter(fixed_name+"/name");
+      node_->undeclare_parameter(fixed_name+"/id");
+    }
 
-      servo_count = new_servo_count;
-      servo_count_update_pending_ = false;
+    // initialize servos
+    servos.resize(new_servo_count);
+    for(uint i=0; i<servos.size(); ++i) {
+      string fixed_name = "servo"+to_string(i+1);
+      auto id = node_->get_parameter(fixed_name+"/id").as_int();
+      string name = node_->get_parameter(fixed_name+"/name").as_string();
+      
+      servos[i].init(serial_port, fixed_name, name, id, node_);
+    }
+
+      param_update_pending_ = false;
   }
 
   int run(int argc, char** argv) {
@@ -327,7 +318,7 @@ class BusServoNode {
       config_serial_port(serial_port);
 
 
-      update_servo_count();
+      update_from_parameters();
 
 
       int loop_hz = 100;
@@ -336,8 +327,8 @@ class BusServoNode {
       while(rclcpp::ok()) {
         ++loop_count;
 
-        if(servo_count_update_pending_) {
-          update_servo_count();
+        if(param_update_pending_) {
+          update_from_parameters();
         }
 
         for(auto & servo : servos) {
@@ -359,11 +350,12 @@ class BusServoNode {
           diag_array.status.push_back(bus_status);
 
           for(auto & servo : servos) {
-            servo.get_status(node_name, diag_array);
+            servo.get_diagnostics(node_name, diag_array);
           }
 
-          diagnostic_pub->publish(diag_array);
+          diag_array.header.stamp = rclcpp::Clock().now();
 
+          diagnostic_pub->publish(diag_array);
         }
         try {
         rclcpp::spin_some(node);
