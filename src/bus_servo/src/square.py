@@ -8,7 +8,7 @@ import math
 
 from std_msgs.msg import String
 from std_msgs.msg import Float64
-from bus_servo_interfaces.msg import ServoCommand
+from bus_servo_interfaces.msg import ServoCommand, ServoPosition
 from bus_servo_interfaces.srv import ServoMoveTimeWrite
 
 
@@ -18,14 +18,10 @@ class SquarePublisher(Node):
         
 
     def yaw_callback(self, msg):
-        if math.isnan(msg.data):
-            self.get_logger().info("got a null yaw")
-            self.get_logger().info(str(msg))
-            
-        self.yaw = msg.data
+        self.yaw = msg.position
 
     def pitch_callback(self, msg):
-        self.pitch = msg.data
+        self.pitch = msg.position
 
     def __init__(self):
         super().__init__('square_publisher')
@@ -46,12 +42,12 @@ class SquarePublisher(Node):
         self.servo1_move_time_write_future = None
 
         self.yaw_subscription = self.create_subscription(
-            Float64,
+            ServoPosition,
             '/servo/yaw',
             self.yaw_callback,
             10)
         self.pitch_subscription = self.create_subscription(
-            Float64,
+            ServoPosition,
             '/servo/pitch',
             self.pitch_callback,
             10)

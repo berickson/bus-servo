@@ -21,6 +21,7 @@ find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/ServoPosition.msg"
   "msg/ServoCommand.msg"
   "srv/ServoMoveTimeWrite.srv"
   DEPENDENCIES builtin_interfaces std_msgs

@@ -14,6 +14,7 @@
 #include <chrono>
 
 #include "bus_servo_interfaces/msg/servo_command.hpp"
+#include "bus_servo_interfaces/msg/servo_position.hpp"
 #include "bus_servo_interfaces/srv/servo_move_time_write.hpp"
 
 std::mutex serial_mutex;
@@ -21,7 +22,7 @@ std::mutex serial_mutex;
 // handles a single servo
 class RosBusServo {
   public:
-  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr publisher;
+  rclcpp::Publisher<bus_servo_interfaces::msg::ServoPosition>::SharedPtr publisher;
 
   int servo_id = 0;
   int serial_port = 0;
@@ -74,7 +75,7 @@ class RosBusServo {
     this->node = node;
     std::string topic = "/servo/"+ name;
     RCLCPP_INFO(node->get_logger(), "publishing on %s",topic.c_str());
-    publisher = node->create_publisher<std_msgs::msg::Float64>(topic, 10);
+    publisher = node->create_publisher<bus_servo_interfaces::msg::ServoPosition>(topic, 10);
     std::string cmd_topic = "/servo_cmd/" + name;
 
     
@@ -91,19 +92,17 @@ class RosBusServo {
 
 
   void loop() {
-    std_msgs::msg::Float64 msg;
+    bus_servo_interfaces::msg::ServoPosition msg;
 
     if(servo_pos_read(serial_port, servo_id, &position)) {
-      msg.data = position;
+      msg.header.stamp = rclcpp::Clock().now();
+      msg.position = position;
+      publisher->publish(msg);
       ++ok_read_count;
     } else {
         ++failed_read_count;
-        msg.data = NAN;
         rclcpp::Clock clock;
         RCLCPP_DEBUG(node->get_logger(), "failed to read servo %d position", servo_id);
-    }
-    if(!isnan(msg.data)) {
-      publisher->publish(msg);
     }
   }
 
@@ -231,7 +230,7 @@ class BusServoNode {
   int serial_port = -1;
 
   // see https://roboticsbackend.com/ros2-rclcpp-parameter-callback/
-  rcl_interfaces::msg::SetParametersResult parameters_callback(const std::vector<rclcpp::Parameter> parameters) {
+  rcl_interfaces::msg::SetParametersResult parameters_callback(const std::vector<rclcpp::Parameter> /*parameters*/) {
     rcl_interfaces::msg::SetParametersResult result;
     RCLCPP_INFO(node_->get_logger(), "parameters callback");
     result.successful = true;
@@ -244,7 +243,7 @@ class BusServoNode {
   void update_from_parameters() {
 
     // add or remove parameters based on servo_count
-    auto old_servo_count = servos.size();
+    int old_servo_count = servos.size();
     auto new_servo_count = node_->get_parameter("servo_count").as_int();
 
     for(int i = old_servo_count+1; i <= new_servo_count; ++i) {
