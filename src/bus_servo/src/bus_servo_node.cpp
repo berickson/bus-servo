@@ -25,6 +25,8 @@ class RosBusServo {
 
   int servo_id = 0;
   int serial_port = 0;
+  int64_t ok_read_count = 0;
+  int64_t failed_read_count = 0;
   rclcpp::Node::SharedPtr node;
   rclcpp::Subscription<bus_servo_interfaces::msg::ServoCommand>::SharedPtr sub;
   bus_servo_interfaces::msg::ServoCommand command;
@@ -89,11 +91,13 @@ class RosBusServo {
 
     if(servo_pos_read(serial_port, servo_id, &position)) {
       msg.data = position;
+      ++ok_read_count;
     } else {
+        ++failed_read_count;
         msg.data = NAN;
         rclcpp::Clock clock;
         // RCLCPP_DEBUG_THROTTLE(node_->get_logger(), clock, 60, "failed to read servo %d", servo_id);
-        RCLCPP_INFO(node->get_logger(), "failed to read servo %d position", servo_id);
+        RCLCPP_DEBUG(node->get_logger(), "failed to read servo %d position", servo_id);
     }
     if(!isnan(msg.data)) {
       publisher->publish(msg);
@@ -114,8 +118,22 @@ class RosBusServo {
       if(servo_pos_read(serial_port, servo_id, &position)) {
         current_position_kv.key = "Current Position";
         current_position_kv.value = std::to_string(position);
-      };
+      } else {
+        servo_status.level = diagnostic_msgs::msg::DiagnosticStatus::ERROR;
+        servo_status.message = "communication failure";
+      }
       servo_status.values.push_back(current_position_kv);
+
+
+      diagnostic_msgs::msg::KeyValue ok_read_count_msg;
+      ok_read_count_msg.key = "OK Read Count";
+      ok_read_count_msg.value = std::to_string(ok_read_count);
+      servo_status.values.push_back(ok_read_count_msg);
+
+      diagnostic_msgs::msg::KeyValue failed_read_count_msg;
+      failed_read_count_msg.key = "Failed Read Count";
+      failed_read_count_msg.value = std::to_string(failed_read_count);
+      servo_status.values.push_back(failed_read_count_msg);
 
 
       diagnostic_msgs::msg::KeyValue position_min_kv;
@@ -347,7 +365,12 @@ class BusServoNode {
           diagnostic_pub->publish(diag_array);
 
         }
+        try {
         rclcpp::spin_some(node);
+        } catch (rclcpp::exceptions::RCLError & e) {
+          cout << "RCLError caught: " << e.what() << endl;
+        }
+
         loop_rate.sleep();
       }
       close(serial_port);

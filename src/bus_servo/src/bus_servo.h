@@ -23,6 +23,7 @@
 #include <errno.h> // Error integer and strerror() function
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <unistd.h> // write(), read(), close()
+// #include <errno.h>
 // #include <cstddef> // std::uint8_t
 
 using namespace std;
@@ -558,7 +559,7 @@ void config_serial_port(int serial_port) {
   // Read in existing settings, and handle any error
   auto rv = tcgetattr(serial_port, &tty);
   if( rv != 0) {
-    fail("error from tcgetattr " + std::to_string(rv));
+    fail("error from tcgetattr " + std::to_string(rv) + " errno: " +to_string(errno) );
   }
 
   tty.c_cflag &= ~PARENB; // Clear parity bit, disabling parity (most common)
